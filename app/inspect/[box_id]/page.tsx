@@ -24,6 +24,7 @@ export default function InspectPage() {
 
 type LoadError = { type: 'forbidden' | 'notfound' | 'other'; message: string };
 type ValidationIssue = { message: string; itemIndex: number | null };
+type StepDirection = 'forward' | 'backward';
 
 function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const now = useMemo(() => new Date(), []);
@@ -40,6 +41,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const [draftRestored, setDraftRestored] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [lastEditedItemId, setLastEditedItemId] = useState<string | null>(null);
+  const [stepDirection, setStepDirection] = useState<StepDirection>('forward');
 
   // Load checklist + restore any saved draft.
   useEffect(() => {
@@ -101,6 +103,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
     if (err) return;
 
     const timer = window.setTimeout(() => {
+      setStepDirection('forward');
       setCurrentIndex((idx) => (idx === currentIndex ? Math.min(idx + 1, tpl.items.length - 1) : idx));
       setLastEditedItemId(null);
       setSubmitError(null);
@@ -145,14 +148,21 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   }
 
   function showValidationIssue(issue: ValidationIssue): void {
-    if (issue.itemIndex !== null) setCurrentIndex(issue.itemIndex);
+    if (issue.itemIndex !== null) {
+      setStepDirection(issue.itemIndex >= currentIndex ? 'forward' : 'backward');
+      setCurrentIndex(issue.itemIndex);
+    }
     setLastEditedItemId(null);
     setSubmitError(issue.message);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function goToItem(index: number): void {
-    setCurrentIndex(Math.min(Math.max(index, 0), tpl!.items.length - 1));
+    const nextIndex = Math.min(Math.max(index, 0), tpl!.items.length - 1);
+    if (nextIndex !== currentIndex) {
+      setStepDirection(nextIndex > currentIndex ? 'forward' : 'backward');
+      setCurrentIndex(nextIndex);
+    }
     setLastEditedItemId(null);
     setSubmitError(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -281,6 +291,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
                 setPhoto(null);
                 setCurrentIndex(0);
                 setLastEditedItemId(null);
+                setStepDirection('forward');
                 setDraftRestored(false);
               }}
               className="font-semibold underline"
@@ -294,51 +305,60 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>
         )}
 
-        <section className="card space-y-3 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase text-slate-500">
-                Item {currentIndex + 1} of {tpl.items.length}
+        <div
+          key={currentItem.box_item_id}
+          className={`inspection-step ${
+            stepDirection === 'backward' ? 'inspection-step-backward' : 'inspection-step-forward'
+          }`}
+        >
+          <section className="card space-y-3 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase text-slate-500">
+                  Item {currentIndex + 1} of {tpl.items.length}
+                </p>
+                <h3 className="truncate text-lg font-bold">{currentItem.item_name}</h3>
+              </div>
+              <p className="shrink-0 text-sm font-medium text-slate-500">
+                {checkedCount}/{tpl.items.length} complete
               </p>
-              <h3 className="truncate text-lg font-bold">{currentItem.item_name}</h3>
             </div>
-            <p className="shrink-0 text-sm font-medium text-slate-500">
-              {checkedCount}/{tpl.items.length} complete
-            </p>
-          </div>
 
-          <div className="flex flex-wrap gap-2" aria-label="Inspection item navigation">
-            {tpl.items.map((it, i) => {
-              const complete = !getItemValidationError(it, obs[it.box_item_id] ?? {});
-              const active = i === currentIndex;
-              return (
-                <button
-                  key={it.box_item_id}
-                  type="button"
-                  onClick={() => goToItem(i)}
-                  className={`h-9 min-w-9 rounded-full border px-3 text-sm font-semibold ${
-                    active
-                      ? 'border-brand bg-brand text-white'
-                      : complete
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : 'border-slate-200 bg-white text-slate-500'
-                  }`}
-                  aria-current={active ? 'step' : undefined}
-                  aria-label={`Go to item ${i + 1}: ${it.item_name}`}
-                >
-                  {i + 1}
-                </button>
-              );
-            })}
-          </div>
-        </section>
+            <div className="flex flex-wrap gap-2" aria-label="Inspection item navigation">
+              {tpl.items.map((it, i) => {
+                const complete = !getItemValidationError(it, obs[it.box_item_id] ?? {});
+                const active = i === currentIndex;
+                return (
+                  <button
+                    key={it.box_item_id}
+                    type="button"
+                    onClick={() => goToItem(i)}
+                    className={`h-9 min-w-9 rounded-full border px-3 text-sm font-semibold ${
+                      active
+                        ? 'border-brand bg-brand text-white'
+                        : complete
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : 'border-slate-200 bg-white text-slate-500'
+                    }`}
+                    aria-current={active ? 'step' : undefined}
+                    aria-label={`Go to item ${i + 1}: ${it.item_name}`}
+                  >
+                    {i + 1}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-        <ChecklistCard
-          item={currentItem}
-          value={obs[currentItem.box_item_id] ?? {}}
-          onChange={setCurrentItem}
-          now={now}
-        />
+          <div className="mt-4">
+            <ChecklistCard
+              item={currentItem}
+              value={obs[currentItem.box_item_id] ?? {}}
+              onChange={setCurrentItem}
+              now={now}
+            />
+          </div>
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <button
