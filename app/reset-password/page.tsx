@@ -6,6 +6,13 @@ import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { CompanyLogo } from '@/components/CompanyLogo';
 import { Spinner, FullScreenLoader } from '@/components/Spinner';
 
+function friendlyResetError(msg: string): string {
+  if (/code verifier|expired|invalid|otp/i.test(msg)) {
+    return 'This reset link is expired, already used, or was opened in a different browser. Request a new reset email and open the newest link once.';
+  }
+  return msg || 'This reset link could not be used. Request a new password reset from the login page.';
+}
+
 export default function ResetPasswordPage() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
@@ -17,20 +24,8 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-    const hashError = hash.get('error_description');
-    if (hashError) {
-      setError(hashError.replace(/\+/g, ' '));
-    }
-
     const supabase = getSupabaseBrowserClient();
     let active = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setHasRecoverySession(Boolean(data.session));
-      setChecking(false);
-    });
 
     const {
       data: { subscription },
@@ -39,6 +34,39 @@ export default function ResetPasswordPage() {
         setHasRecoverySession(Boolean(session));
       }
     });
+
+    async function loadRecoverySession() {
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const search = new URLSearchParams(window.location.search);
+      const linkError = hash.get('error_description') ?? search.get('error_description');
+      const code = search.get('code');
+
+      if (linkError) {
+        setError(friendlyResetError(linkError.replace(/\+/g, ' ')));
+        setHasRecoverySession(false);
+        setChecking(false);
+        return;
+      }
+
+      if (code) {
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        if (!active) return;
+        if (exchangeError) {
+          setError(friendlyResetError(exchangeError.message));
+          setHasRecoverySession(false);
+          setChecking(false);
+          return;
+        }
+        window.history.replaceState(null, '', '/reset-password');
+      }
+
+      const { data } = await supabase.auth.getSession();
+      if (!active) return;
+      setHasRecoverySession(Boolean(data.session));
+      setChecking(false);
+    }
+
+    void loadRecoverySession();
 
     return () => {
       active = false;
