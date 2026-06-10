@@ -119,8 +119,35 @@ export interface ReminderContext {
   boxId: string;
 }
 
+export interface TopupEmailContext {
+  boxCode: string | null;
+  boxName: string;
+  location: string;
+  inspectorName: string;
+  overallStatus: string;
+  boxId: string;
+  items: Array<{
+    itemName: string;
+    priority: string;
+    reason: string;
+    requiredQuantity: number | null;
+    observedQuantity: number | null;
+    observedVolumeLevel: string | null;
+    expiryDate: string | null;
+  }>;
+}
+
 function inspectLink(boxId: string): string {
   return `${PUBLIC_ENV.appUrl()}/inspect/${boxId}`;
+}
+
+function adminLink(): string {
+  return `${PUBLIC_ENV.appUrl()}/admin`;
+}
+
+function displayValue(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '-';
+  return String(value);
 }
 
 /** First-aider reminder email. */
@@ -149,6 +176,77 @@ export function buildReminderEmail(ctx: ReminderContext): {
       <p><a href="${escapeHtml(link)}"
             style="background:#dc2626;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">
          Complete inspection</a></p>
+    </div>`;
+  return { subject, html, text };
+}
+
+/** Admin/EHS notification when an inspection creates new top-up requests. */
+export function buildTopupEmail(ctx: TopupEmailContext): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const boxLabel = ctx.boxCode ? `${ctx.boxCode} - ${ctx.boxName}` : ctx.boxName;
+  const dashboardUrl = adminLink();
+  const link = inspectLink(ctx.boxId);
+  const itemLines = ctx.items
+    .map((item) => {
+      const observed = item.observedVolumeLevel ?? item.observedQuantity;
+      return `- ${item.itemName}: ${item.priority} - ${item.reason} (observed: ${displayValue(observed)})`;
+    })
+    .join('\n');
+  const subject = `Top-up required: ${boxLabel}`;
+  const text =
+    `A first aid inspection submitted by ${ctx.inspectorName} created ${ctx.items.length} top-up request(s).\n\n` +
+    `Box: ${boxLabel}\nLocation: ${ctx.location}\nInspection status: ${ctx.overallStatus}\n\n` +
+    `Items needing action:\n${itemLines}\n\n` +
+    `Top-ups dashboard: ${dashboardUrl}\nInspection link: ${link}\n`;
+  const rows = ctx.items
+    .map((item) => {
+      const observed = item.observedVolumeLevel ?? item.observedQuantity;
+      return `
+        <tr>
+          <td style="padding:8px;border-top:1px solid #e5e7eb">${escapeHtml(item.itemName)}</td>
+          <td style="padding:8px;border-top:1px solid #e5e7eb">${escapeHtml(item.priority)}</td>
+          <td style="padding:8px;border-top:1px solid #e5e7eb">${escapeHtml(item.reason)}</td>
+          <td style="padding:8px;border-top:1px solid #e5e7eb">${escapeHtml(displayValue(observed))}</td>
+          <td style="padding:8px;border-top:1px solid #e5e7eb">${escapeHtml(displayValue(item.requiredQuantity))}</td>
+          <td style="padding:8px;border-top:1px solid #e5e7eb">${escapeHtml(displayValue(item.expiryDate))}</td>
+        </tr>`;
+    })
+    .join('');
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:680px">
+      <h2 style="margin:0 0 12px;color:#b91c1c">First Aid Box Top-up Required</h2>
+      <p>An inspection submitted by <strong>${escapeHtml(ctx.inspectorName)}</strong> created
+         <strong>${ctx.items.length}</strong> new top-up request(s).</p>
+      <table style="border-collapse:collapse;margin:16px 0">
+        <tr><td style="padding:4px 12px 4px 0;color:#555">Box</td><td>${escapeHtml(boxLabel)}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0;color:#555">Location</td><td>${escapeHtml(ctx.location)}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0;color:#555">Inspection status</td><td>${escapeHtml(ctx.overallStatus)}</td></tr>
+      </table>
+      <table style="border-collapse:collapse;width:100%;margin:16px 0;font-size:14px">
+        <thead>
+          <tr style="text-align:left;background:#f9fafb">
+            <th style="padding:8px">Item</th>
+            <th style="padding:8px">Priority</th>
+            <th style="padding:8px">Reason</th>
+            <th style="padding:8px">Observed</th>
+            <th style="padding:8px">Required</th>
+            <th style="padding:8px">Expiry</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p>
+        <a href="${escapeHtml(dashboardUrl)}"
+           style="background:#dc2626;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">
+          Open top-ups dashboard
+        </a>
+      </p>
+      <p style="font-size:13px;color:#4b5563">Inspection link:
+        <a href="${escapeHtml(link)}">${escapeHtml(link)}</a>
+      </p>
     </div>`;
   return { subject, html, text };
 }

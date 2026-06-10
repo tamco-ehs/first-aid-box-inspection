@@ -19,7 +19,8 @@
 import { ApiError, badRequest, jsonOk, notFound, safe } from '@/lib/http';
 import { requireActive, requireBoxAccess, requireRole } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { PUBLIC_ENV } from '@/lib/env';
+import { PUBLIC_ENV, SERVER_ENV } from '@/lib/env';
+import { buildTopupEmail, sendEmail } from '@/lib/email';
 import { INSPECTION_PHOTO_FOLDER, isAllowedCloudinaryUrl } from '@/lib/logic/cloudinary-url.ts';
 import {
   computeOverallStatus,
@@ -47,6 +48,14 @@ interface SpecRow {
   restock_threshold_quantity: number | null;
 }
 
+interface BoxRow {
+  id: string;
+  is_active: boolean;
+  box_code: string | null;
+  box_name: string;
+  location_description: string;
+}
+
 export async function POST(req: Request): Promise<Response> {
   return safe(async () => {
     const ctx = await requireActive();
@@ -61,10 +70,11 @@ export async function POST(req: Request): Promise<Response> {
     // 3. box exists + active
     const { data: box } = await admin
       .from('boxes')
-      .select('id, is_active')
+      .select('id, is_active, box_code, box_name, location_description')
       .eq('id', body.box_id)
       .maybeSingle();
-    if (!box || !(box as { is_active: boolean }).is_active) {
+    const boxRow = box as BoxRow | null;
+    if (!boxRow || !boxRow.is_active) {
       throw notFound('First aid box not found or inactive.');
     }
 
@@ -218,6 +228,38 @@ export async function POST(req: Request): Promise<Response> {
       if (topupRows.length > 0) {
         const { error: topupErr } = await admin.from('topup_requests').insert(topupRows);
         if (topupErr) throw topupErr;
+
+        const adminEmail = SERVER_ENV.adminNotificationEmail();
+        if (adminEmail) {
+          const mail = buildTopupEmail({
+            boxCode: boxRow.box_code,
+            boxName: boxRow.box_name,
+            location: boxRow.location_description,
+            inspectorName: ctx.profile.full_name,
+            overallStatus: overall,
+            boxId: body.box_id,
+            items: topupRows.map((r) => ({
+              itemName: r.item_name,
+              priority: r.priority,
+              reason: r.reason,
+              requiredQuantity: r.required_quantity,
+              observedQuantity: r.observed_quantity,
+              observedVolumeLevel: r.observed_volume_level,
+              expiryDate: r.expiry_date,
+            })),
+          });
+          const emailResult = await sendEmail({
+            to: [adminEmail],
+            subject: mail.subject,
+            html: mail.html,
+            text: mail.text,
+          });
+          if (!emailResult.ok) {
+            console.error('[inspections] top-up email failed:', emailResult.error);
+          }
+        } else {
+          console.warn('[inspections] top-up email skipped: ADMIN_NOTIFICATION_EMAIL is not set.');
+        }
       }
 
       // update each box item's last-known state
