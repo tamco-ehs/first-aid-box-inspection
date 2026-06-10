@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  /* Comfortable tap targets and no accidental text zoom on iOS inputs. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-slate-100 text-slate-900 antialiased;
+}
+
+/* Reusable, shopfloor-friendly building blocks. Keeping these as component
+   classes keeps the JSX readable and the touch targets consistent. */
+@layer components {
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl font-semibold
+           transition active:scale-[.98] disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-lg {
+    @apply min-h-14 px-5 text-base;
+  }
+  .btn-md {
+    @apply min-h-touch px-4 text-sm;
+  }
+  .btn-primary {
+    @apply bg-brand text-white hover:bg-brand-dark;
+  }
+  .btn-secondary {
+    @apply border border-slate-300 bg-white text-slate-800 hover:bg-slate-50;
+  }
+  .btn-ghost {
+    @apply text-slate-700 hover:bg-slate-100;
+  }
+  .btn-danger {
+    @apply bg-red-600 text-white hover:bg-red-700;
+  }
+
+  .card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  .input,
+  .select,
+  .textarea {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base
+           outline-none focus:border-brand focus:ring-2 focus:ring-brand/30;
+  }
+
+  .label {
+    @apply mb-1 block text-sm font-medium text-slate-700;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+
+  /* Large segmented choice buttons (volume level / present-absent). */
+  .choice {
+    @apply min-h-touch flex-1 rounded-xl border-2 border-slate-200 bg-white px-2 py-2
+           text-sm font-semibold text-slate-700 transition active:scale-[.98];
+  }
+  .choice-on-ok {
+    @apply border-emerald-500 bg-emerald-50 text-emerald-800;
+  }
+  .choice-on-warn {
+    @apply border-amber-500 bg-amber-50 text-amber-800;
+  }
+  .choice-on-bad {
+    @apply border-red-500 bg-red-50 text-red-800;
+  }
+}
+
+/* Status color helpers (badges + card accents). */
+@layer utilities {
+  .status-ok {
+    @apply bg-emerald-100 text-emerald-800;
+  }
+  .status-warn {
+    @apply bg-amber-100 text-amber-900;
+  }
+  .status-bad {
+    @apply bg-red-100 text-red-800;
+  }
+  .status-neutral {
+    @apply bg-slate-200 text-slate-700;
+  }
+}

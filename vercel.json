@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/check-reminders",
+      "schedule": "0 0 * * *"
+    }
+  ],
+  "functions": {
+    "app/api/check-reminders/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

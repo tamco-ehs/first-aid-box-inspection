@@ -1,0 +1,7 @@
+# This application is private. It is intentionally not indexed.
+# Search-engine de-indexing is NOT a security control - every sensitive route
+# requires authentication regardless (see SECURITY.md).
+User-agent: *
+Disallow: /
+
+# No sitemap is published on purpose.
