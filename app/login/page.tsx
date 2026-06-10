@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { api } from '@/lib/client/api.ts';
 import { takeIntendedPath } from '@/lib/client/intent.ts';
+import { CompanyLogo } from '@/components/CompanyLogo';
 import { Spinner, FullScreenLoader } from '@/components/Spinner';
 
 function friendlyAuthError(msg: string): string {
@@ -151,6 +152,7 @@ export default function LoginPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-6">
       <div className="mb-8 text-center">
+        <CompanyLogo className="mx-auto mb-5 h-12 w-auto max-w-[220px]" />
         <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand text-3xl text-white">
           ✚
         </div>

@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { CompanyLogo } from '@/components/CompanyLogo';
 import { Spinner } from '@/components/Spinner';
 
 // Sticky top bar. `backHref` shows a back chevron; `right` is an optional slot.
@@ -39,6 +40,7 @@ export function AppHeader({
             <span aria-hidden>‹</span>
           </a>
         )}
+        <CompanyLogo className="h-7 w-auto max-w-[92px] shrink-0" />
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-lg font-bold leading-tight">{title}</h1>
           {subtitle && <p className="truncate text-xs text-slate-500">{subtitle}</p>}
