@@ -7,6 +7,8 @@ import { Badge } from '@/components/StatusBadge';
 import { ItemPhotoUploader } from './ItemPhotoUploader.tsx';
 import { Notice, Section, useAsync, type TemplateItemRow, type TemplateRow } from './shared.tsx';
 
+const UNIT_OPTIONS = ['pcs', 'set', 'pack', 'roll', 'pair', 'bottle', 'tube', 'box', 'tablet', 'sheet'] as const;
+
 export function TemplateAdmin() {
   const sb = getSupabaseBrowserClient();
   const { data, loading, error, reload } = useAsync<{ templates: TemplateRow[]; items: TemplateItemRow[] }>(async () => {
@@ -120,7 +122,21 @@ function TemplateItemEditor({
           <input type="number" min={0} className="input" value={f.required_quantity ?? ''} onChange={(e) => setF({ ...f, required_quantity: e.target.value === '' ? null : Number(e.target.value) })} />
         </L>
         <L label="Unit">
-          <input className="input" value={f.unit ?? ''} onChange={(e) => setF({ ...f, unit: e.target.value })} />
+          <select
+            className="select"
+            value={f.unit ?? ''}
+            onChange={(e) => setF({ ...f, unit: e.target.value || null })}
+          >
+            <option value="">None</option>
+            {f.unit && !UNIT_OPTIONS.includes(f.unit as (typeof UNIT_OPTIONS)[number]) && (
+              <option value={f.unit}>{f.unit}</option>
+            )}
+            {UNIT_OPTIONS.map((unit) => (
+              <option key={unit} value={unit}>
+                {unit}
+              </option>
+            ))}
+          </select>
         </L>
         <L label="Measurement">
           <select className="select" value={f.measurement_type} onChange={(e) => setF({ ...f, measurement_type: e.target.value as TemplateItemRow['measurement_type'] })}>

@@ -8,7 +8,7 @@ import { hasObservation, toSpec } from '@/lib/client/inspect-helpers.ts';
 import { ItemPhoto } from '@/components/ItemPhoto';
 import { Badge, ItemStatusBadge } from '@/components/StatusBadge';
 
-const VOLUME_LEVELS: VolumeLevel[] = ['Full', 'Three Quarter', 'Half', 'Below Half', 'Empty'];
+const VOLUME_LEVELS: VolumeLevel[] = ['Full', 'Half', 'Empty'];
 const VOLUME_TONE: Record<VolumeLevel, 'ok' | 'warn' | 'bad'> = {
   Full: 'ok',
   'Three Quarter': 'ok',
