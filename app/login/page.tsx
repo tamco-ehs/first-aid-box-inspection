@@ -21,6 +21,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [resetSending, setResetSending] = useState(false);
   const [noBox, setNoBox] = useState(false);
 
   // Decide where to send the user once authenticated.
@@ -79,6 +81,7 @@ export default function LoginPage() {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     setNoBox(false);
 
     const { error: authError } = await getSupabaseBrowserClient().auth.signInWithPassword({
@@ -96,6 +99,32 @@ export default function LoginPage() {
       setError('Signed in, but could not load your account. Please try again.');
       setSubmitting(false);
     }
+  }
+
+  async function sendPasswordReset() {
+    if (resetSending) return;
+    const targetEmail = email.trim();
+    if (!targetEmail) {
+      setError('Enter your email first, then click forgot password.');
+      return;
+    }
+
+    setResetSending(true);
+    setError(null);
+    setNotice(null);
+    const { error: resetError } = await getSupabaseBrowserClient().auth.resetPasswordForEmail(
+      targetEmail,
+      {
+        redirectTo: `${window.location.origin}/reset-password`,
+      },
+    );
+
+    if (resetError) {
+      setError(resetError.message);
+    } else {
+      setNotice('Password reset email sent. Check your inbox and open the latest link.');
+    }
+    setResetSending(false);
   }
 
   if (checking) return <FullScreenLoader label="Checking your session…" />;
@@ -157,9 +186,22 @@ export default function LoginPage() {
         {error && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>
         )}
+        {notice && (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+            {notice}
+          </p>
+        )}
 
         <button type="submit" disabled={submitting} className="btn btn-lg btn-primary w-full">
           {submitting ? <Spinner className="h-5 w-5" /> : 'Sign in'}
+        </button>
+        <button
+          type="button"
+          onClick={sendPasswordReset}
+          disabled={resetSending}
+          className="w-full text-center text-sm font-semibold text-brand"
+        >
+          {resetSending ? 'Sending reset email...' : 'Forgot password?'}
         </button>
       </form>
 
