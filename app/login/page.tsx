@@ -15,6 +15,13 @@ function friendlyAuthError(msg: string): string {
   return 'Could not sign in. Please try again.';
 }
 
+function friendlyResetLinkError(msg: string): string {
+  if (/expired|invalid/i.test(msg)) {
+    return 'This password reset link is expired or already used. Request a new reset email and open the newest link.';
+  }
+  return msg || 'The password reset link could not be used. Request a new reset email.';
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
@@ -62,6 +69,28 @@ export default function LoginPage() {
 
   // If already signed in, skip the form.
   useEffect(() => {
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const search = new URLSearchParams(window.location.search);
+    const hasAuthError = hash.has('error') || search.has('error');
+    const resetError = hash.get('error_description') ?? search.get('error_description');
+    const isRecoveryRedirect =
+      hash.get('type') === 'recovery' ||
+      search.get('type') === 'recovery' ||
+      hash.has('access_token') ||
+      search.has('code');
+
+    if (hasAuthError || resetError) {
+      setError(friendlyResetLinkError((resetError ?? '').replace(/\+/g, ' ')));
+      window.history.replaceState(null, '', '/login');
+      setChecking(false);
+      return;
+    }
+
+    if (isRecoveryRedirect) {
+      window.location.replace(`/reset-password${window.location.search}${window.location.hash}`);
+      return;
+    }
+
     let active = true;
     (async () => {
       try {
