@@ -30,6 +30,12 @@ const toneClass = {
   },
 };
 
+function yesterdayIso(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export function ChecklistCard({
   item,
   value,
@@ -54,9 +60,10 @@ export function ChecklistCard({
       : item.measurement_type === 'volume_level'
         ? 'Check fill level'
         : 'Check presence / condition';
+  const hasIssue = Boolean(live && (live.topup_required || live.item_status !== 'OK'));
 
   return (
-    <div className="card p-4">
+    <div className="card p-3">
       <div className="flex gap-3">
         <ItemPhoto url={item.item_photo_url} name={item.item_name} />
         <div className="min-w-0 flex-1">
@@ -143,10 +150,36 @@ export function ChecklistCard({
           </span>
           <input
             type="date"
-            className="input"
+            className="input min-h-12 py-2"
             value={value.expiry_date ?? ''}
-            onChange={(e) => set({ expiry_date: e.target.value || null })}
+            onChange={(e) => set({ expiry_date: e.target.value || null, expiry_quick_option: null })}
           />
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                set({
+                  expiry_date: yesterdayIso(),
+                  expiry_quick_option: 'no_label',
+                  remarks: value.remarks?.trim() ? value.remarks : 'No expiry label found.',
+                })
+              }
+              className={`btn btn-secondary min-h-11 px-3 text-sm ${
+                value.expiry_quick_option === 'no_label' ? 'border-amber-500 bg-amber-50 text-amber-800' : ''
+              }`}
+            >
+              No expiry label found
+            </button>
+            <button
+              type="button"
+              onClick={() => set({ expiry_date: yesterdayIso(), expiry_quick_option: 'expired' })}
+              className={`btn btn-secondary min-h-11 px-3 text-sm ${
+                value.expiry_quick_option === 'expired' ? 'border-red-500 bg-red-50 text-red-800' : ''
+              }`}
+            >
+              Expired
+            </button>
+          </div>
           {live?.is_expired && (
             <span className="mt-1 block text-sm font-bold text-red-600">⚠ Expired — replace immediately</span>
           )}
@@ -158,7 +191,7 @@ export function ChecklistCard({
 
       {/* Remarks */}
       <label className="mt-3 block">
-        <span className="label">Remarks (optional)</span>
+        <span className="label">{hasIssue ? 'Remarks (required for issue)' : 'Remarks (optional)'}</span>
         <input
           type="text"
           className="input"

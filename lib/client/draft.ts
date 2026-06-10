@@ -11,6 +11,7 @@ export interface DraftObservation {
   observed_volume_level?: VolumeLevel | null;
   observed_present_status?: PresentStatus | null;
   expiry_date?: string | null;
+  expiry_quick_option?: 'no_label' | 'expired' | null;
   remarks?: string | null;
 }
 

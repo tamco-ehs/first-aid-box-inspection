@@ -1,17 +1,18 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { api, ApiClientError, type InspectionSubmitBody } from '@/lib/client/api.ts';
-import type { InspectionResult, InspectionTemplateResponse, Me } from '@/lib/client/types.ts';
+import type { InspectionResult, InspectionTemplateResponse, Me, TemplateItem } from '@/lib/client/types.ts';
 import { clearDraft, loadDraft, saveDraft, type DraftObservation } from '@/lib/client/draft.ts';
 import { hasObservation, toSpec } from '@/lib/client/inspect-helpers.ts';
-import { validateObservation } from '@/lib/logic/inspection.ts';
+import { evaluateItem, validateObservation } from '@/lib/logic/inspection.ts';
 import { computeDue } from '@/lib/logic/due.ts';
 import { formatDate } from '@/lib/client/format.ts';
 import { RequireAuth, AccessBlocked } from '@/components/RequireAuth';
 import { AppHeader } from '@/components/AppHeader';
 import { ChecklistCard } from '@/components/ChecklistCard';
+import { CompanyLogo } from '@/components/CompanyLogo';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { Spinner, FullScreenLoader } from '@/components/Spinner';
 import { Badge, DueBadge, OverallBadge, PriorityBadge } from '@/components/StatusBadge';
@@ -23,14 +24,30 @@ export default function InspectPage() {
 }
 
 type LoadError = { type: 'forbidden' | 'notfound' | 'other'; message: string };
-type ValidationIssue = { message: string; itemIndex: number | null };
+type InspectionPhase = 'confirm' | 'items' | 'review';
+type ActiveSheet = 'details' | 'items' | null;
 type StepDirection = 'forward' | 'backward';
+type FlowStatus = 'Pending' | 'Completed' | 'Issue found';
+type ValidationIssue = { message: string; itemIndex: number | null };
+
+interface ItemReview {
+  status: FlowStatus;
+  label: string;
+  detail: string | null;
+  tone: 'neutral' | 'ok' | 'warn';
+  topupRequired: boolean;
+  expired: boolean;
+  missing: boolean;
+  hasRemarks: boolean;
+}
 
 function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const now = useMemo(() => new Date(), []);
   const [tpl, setTpl] = useState<InspectionTemplateResponse | null>(null);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
 
+  const [phase, setPhase] = useState<InspectionPhase>('confirm');
+  const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
   const [obs, setObs] = useState<Record<string, DraftObservation>>({});
   const [notes, setNotes] = useState('');
   const [photo, setPhoto] = useState<{ url: string; publicId: string } | null>(null);
@@ -43,7 +60,6 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const [lastEditedItemId, setLastEditedItemId] = useState<string | null>(null);
   const [stepDirection, setStepDirection] = useState<StepDirection>('forward');
 
-  // Load checklist + restore any saved draft.
   useEffect(() => {
     let active = true;
     (async () => {
@@ -74,7 +90,6 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
     };
   }, [boxId]);
 
-  // Auto-save the draft on every change (offline-resilient).
   useEffect(() => {
     if (!tpl || result) return;
     saveDraft({
@@ -89,18 +104,14 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
 
   useEffect(() => {
     if (!tpl) return;
-    if (currentIndex >= tpl.items.length) {
-      setCurrentIndex(Math.max(0, tpl.items.length - 1));
-    }
+    if (currentIndex >= tpl.items.length) setCurrentIndex(Math.max(0, tpl.items.length - 1));
   }, [tpl, currentIndex]);
 
   useEffect(() => {
-    if (!tpl || !lastEditedItemId) return;
+    if (!tpl || !lastEditedItemId || phase !== 'items') return;
     const item = tpl.items[currentIndex];
     if (!item || item.box_item_id !== lastEditedItemId || currentIndex >= tpl.items.length - 1) return;
-
-    const err = getItemValidationError(item, obs[item.box_item_id] ?? {});
-    if (err) return;
+    if (getItemValidationError(item, obs[item.box_item_id] ?? {})) return;
 
     const timer = window.setTimeout(() => {
       setStepDirection('forward');
@@ -111,7 +122,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
     }, 600);
 
     return () => window.clearTimeout(timer);
-  }, [tpl, currentIndex, obs, lastEditedItemId]);
+  }, [tpl, phase, currentIndex, obs, lastEditedItemId]);
 
   if (loadError?.type === 'forbidden') {
     return <AccessBlocked message="You are not assigned to this first aid box." />;
@@ -122,43 +133,111 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   if (loadError) {
     return <AccessBlocked message={loadError.message} />;
   }
-  if (!tpl) return <FullScreenLoader label="Loading checklist…" />;
+  if (!tpl) return <FullScreenLoader label="Loading checklist..." />;
 
-  // Result screen
   if (result) {
     return <ResultView result={result} tpl={tpl} />;
   }
 
-  function getItemValidationError(
-    item: InspectionTemplateResponse['items'][number],
-    value: DraftObservation,
-  ): string | null {
+  function getBaseValidationError(item: TemplateItem, value: DraftObservation): string | null {
     if (!hasObservation(item, value)) return `Check ${item.item_name} before continuing.`;
     return validateObservation(toSpec(item), value);
   }
 
-  function findValidationIssue(): ValidationIssue | null {
+  function getItemReview(item: TemplateItem, value: DraftObservation): ItemReview {
+    const baseError = getBaseValidationError(item, value);
+    if (baseError) {
+      return {
+        status: 'Pending',
+        label: 'Pending',
+        detail: null,
+        tone: 'neutral',
+        topupRequired: false,
+        expired: false,
+        missing: false,
+        hasRemarks: Boolean(value.remarks?.trim()),
+      };
+    }
+
+    const evaluated = evaluateItem(toSpec(item), value, now);
+    const noExpiryLabel = value.expiry_quick_option === 'no_label';
+    const issue = noExpiryLabel || evaluated.topup_required || evaluated.item_status !== 'OK';
+    const detail = noExpiryLabel ? 'No expiry label' : issue ? evaluated.item_status : null;
+
+    return {
+      status: issue ? 'Issue found' : 'Completed',
+      label: issue ? 'Issue found' : 'Completed',
+      detail,
+      tone: issue ? 'warn' : 'ok',
+      topupRequired: issue,
+      expired: noExpiryLabel ? false : evaluated.is_expired,
+      missing: evaluated.item_status === 'Missing',
+      hasRemarks: Boolean(value.remarks?.trim()),
+    };
+  }
+
+  function getItemValidationError(item: TemplateItem, value: DraftObservation): string | null {
+    const baseError = getBaseValidationError(item, value);
+    if (baseError) return baseError;
+
+    const review = getItemReview(item, value);
+    if (review.status === 'Issue found' && !value.remarks?.trim()) {
+      return `Add remarks for ${item.item_name} because an issue was found.`;
+    }
+    return null;
+  }
+
+  function findItemValidationIssue(): ValidationIssue | null {
     for (let i = 0; i < tpl!.items.length; i += 1) {
       const it = tpl!.items[i]!;
       const err = getItemValidationError(it, obs[it.box_item_id] ?? {});
       if (err) return { message: err, itemIndex: i };
     }
+    return null;
+  }
+
+  function findSubmissionValidationIssue(): ValidationIssue | null {
+    const itemIssue = findItemValidationIssue();
+    if (itemIssue) return itemIssue;
     if (!photo) return { message: 'Please take a live photo of the first aid box.', itemIndex: null };
     return null;
   }
 
   function showValidationIssue(issue: ValidationIssue): void {
     if (issue.itemIndex !== null) {
+      setPhase('items');
       setStepDirection(issue.itemIndex >= currentIndex ? 'forward' : 'backward');
       setCurrentIndex(issue.itemIndex);
+    } else {
+      setPhase('review');
     }
+    setActiveSheet(null);
     setLastEditedItemId(null);
     setSubmitError(issue.message);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  function clearCurrentDraft(): void {
+    clearDraft(boxId);
+    setObs({});
+    setNotes('');
+    setPhoto(null);
+    setCurrentIndex(0);
+    setLastEditedItemId(null);
+    setStepDirection('forward');
+    setDraftRestored(false);
+    setSubmitError(null);
+  }
+
+  function startInspection(): void {
+    setPhase('items');
+    setSubmitError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   function goToItem(index: number): void {
     const nextIndex = Math.min(Math.max(index, 0), tpl!.items.length - 1);
+    setPhase('items');
     if (nextIndex !== currentIndex) {
       setStepDirection(nextIndex > currentIndex ? 'forward' : 'backward');
       setCurrentIndex(nextIndex);
@@ -168,7 +247,29 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  function openReview(): void {
+    const issue = findItemValidationIssue();
+    if (issue) {
+      showValidationIssue(issue);
+      return;
+    }
+    setPhase('review');
+    setActiveSheet(null);
+    setSubmitError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   function nextItem(): void {
+    const item = tpl!.items[currentIndex]!;
+    const err = getItemValidationError(item, obs[item.box_item_id] ?? {});
+    if (err) {
+      showValidationIssue({ message: err, itemIndex: currentIndex });
+      return;
+    }
+    if (currentIndex >= tpl!.items.length - 1) {
+      openReview();
+      return;
+    }
     goToItem(currentIndex + 1);
   }
 
@@ -179,7 +280,8 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
       previous.observed_quantity !== next.observed_quantity ||
       previous.observed_volume_level !== next.observed_volume_level ||
       previous.observed_present_status !== next.observed_present_status ||
-      previous.expiry_date !== next.expiry_date;
+      previous.expiry_date !== next.expiry_date ||
+      previous.expiry_quick_option !== next.expiry_quick_option;
 
     setObs((p) => ({ ...p, [item.box_item_id]: next }));
     setLastEditedItemId(changedInspectionValue ? item.box_item_id : null);
@@ -188,7 +290,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
 
   async function submit() {
     if (submitting) return;
-    const issue = findValidationIssue();
+    const issue = findSubmissionValidationIssue();
     if (issue) {
       showValidationIssue(issue);
       return;
@@ -215,26 +317,39 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
         }),
       };
       const res = await api.submitInspection(body);
-      clearDraft(boxId); // keep the draft only if submit failed
+      clearDraft(boxId);
       setResult(res);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
-      const localIssue = findValidationIssue();
+      const localIssue = findSubmissionValidationIssue();
       if (localIssue) {
         showValidationIssue(localIssue);
         return;
       }
-      setSubmitError(
-        e instanceof Error ? e.message : 'Submission failed. Your draft is saved — please retry.',
-      );
+      setSubmitError(e instanceof Error ? e.message : 'Submission failed. Your draft is saved - please retry.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setSubmitting(false);
     }
   }
 
-  const checkedCount = tpl.items.filter((it) => !getItemValidationError(it, obs[it.box_item_id] ?? {})).length;
+  const itemReviews = tpl.items.map((it) => getItemReview(it, obs[it.box_item_id] ?? {}));
+  const itemValidationErrors = tpl.items.map((it) => getItemValidationError(it, obs[it.box_item_id] ?? {}));
+  const completedCount = itemReviews.filter((r) => r.status === 'Completed').length;
+  const issueCount = itemReviews.filter((r) => r.status === 'Issue found').length;
+  const checkedCount = completedCount + issueCount;
+  const pendingCount = itemReviews.filter((r) => r.status === 'Pending').length;
+  const topupCount = itemReviews.filter((r) => r.topupRequired).length;
+  const expiredCount = itemReviews.filter((r) => r.expired).length;
+  const missingCount = itemReviews.filter((r) => r.missing).length;
+  const remarksOrIssueCount = tpl.items.filter((it, i) => itemReviews[i]!.status === 'Issue found' || obs[it.box_item_id]?.remarks?.trim()).length;
+  const progressPercent = Math.round((checkedCount / Math.max(1, tpl.items.length)) * 100);
   const currentItem = tpl.items[currentIndex] ?? tpl.items[0]!;
+  const shortLocation = tpl.box.area || tpl.box.box_name;
+  const guidanceNote =
+    tpl.template?.guideline_reference ||
+    tpl.template?.description ||
+    'Confirm this is the correct first aid box before starting the inspection.';
   const due = tpl.last_inspection
     ? computeDue({
         lastInspectionAt: tpl.last_inspection.created_at,
@@ -244,182 +359,308 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
       })
     : null;
 
-  return (
-    <>
-      <AppHeader title={tpl.box.box_name} subtitle={tpl.box.box_code} backHref="/my-boxes" />
-      <main className="mx-auto max-w-3xl space-y-4 p-4 pb-28">
-        {/* Box header */}
-        <section className="card p-4">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-xs font-semibold text-slate-500">{tpl.box.box_code}</p>
-              <h2 className="text-lg font-bold">{tpl.box.box_name}</h2>
-            </div>
-            {due ? (
-              <DueBadge status={due.due_status} daysOverdue={due.days_overdue} />
-            ) : (
-              <Badge tone="neutral">Not Yet Inspected</Badge>
-            )}
-          </div>
-          <dl className="mt-2 grid grid-cols-3 gap-y-1 text-sm">
-            <dt className="text-slate-500">Location</dt>
-            <dd className="col-span-2">{tpl.box.location_description}</dd>
-            {tpl.box.area && (
-              <>
-                <dt className="text-slate-500">Area</dt>
-                <dd className="col-span-2">{tpl.box.area}</dd>
-              </>
-            )}
-            <dt className="text-slate-500">Inspector</dt>
-            <dd className="col-span-2">{me.full_name}</dd>
-            <dt className="text-slate-500">Last inspection</dt>
-            <dd className="col-span-2">{formatDate(tpl.last_inspection?.created_at)}</dd>
-          </dl>
-          {tpl.template?.guideline_reference && (
-            <p className="mt-2 text-xs text-slate-400">{tpl.template.guideline_reference}</p>
-          )}
-        </section>
+  const draftBanner = draftRestored ? (
+    <div className="flex items-center justify-between gap-2 rounded-full bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+      <span>Draft restored</span>
+      <div className="flex items-center gap-3 font-semibold">
+        <button type="button" onClick={() => setDraftRestored(false)} className="text-amber-700">
+          Dismiss
+        </button>
+        <button type="button" onClick={clearCurrentDraft} className="text-red-600">
+          Clear
+        </button>
+      </div>
+    </div>
+  ) : null;
 
-        {draftRestored && (
-          <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            <span>Draft restored from this device.</span>
-            <button
-              onClick={() => {
-                clearDraft(boxId);
-                setObs({});
-                setNotes('');
-                setPhoto(null);
-                setCurrentIndex(0);
-                setLastEditedItemId(null);
-                setStepDirection('forward');
-                setDraftRestored(false);
+  if (phase === 'confirm') {
+    return (
+      <>
+        <AppHeader title="Confirm box" subtitle={tpl.box.box_code} backHref="/my-boxes" />
+        <main className="mx-auto max-w-md space-y-3 p-4">
+          {draftBanner}
+          <section className="card p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-slate-500">{tpl.box.box_code}</p>
+                <h1 className="text-xl font-bold">{tpl.box.box_name}</h1>
+              </div>
+              {due ? <DueBadge status={due.due_status} daysOverdue={due.days_overdue} /> : <Badge tone="neutral">Not Yet Inspected</Badge>}
+            </div>
+            <dl className="mt-4 grid grid-cols-3 gap-y-2 text-sm">
+              <dt className="text-slate-500">Location</dt>
+              <dd className="col-span-2 font-medium">{tpl.box.location_description}</dd>
+              {tpl.box.area && (
+                <>
+                  <dt className="text-slate-500">Area</dt>
+                  <dd className="col-span-2 font-medium">{tpl.box.area}</dd>
+                </>
+              )}
+              <dt className="text-slate-500">Inspector</dt>
+              <dd className="col-span-2 font-medium">{me.full_name}</dd>
+              <dt className="text-slate-500">Last check</dt>
+              <dd className="col-span-2 font-medium">{formatDate(tpl.last_inspection?.created_at)}</dd>
+            </dl>
+            <p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">{guidanceNote}</p>
+          </section>
+          <button type="button" onClick={startInspection} className="btn btn-lg btn-primary w-full">
+            Start Inspection
+          </button>
+        </main>
+      </>
+    );
+  }
+
+  if (phase === 'review') {
+    return (
+      <>
+        <AppHeader title="Final review" subtitle={tpl.box.box_code} backHref="/my-boxes" />
+        <main className="mx-auto max-w-md space-y-3 p-4 pb-28">
+          {draftBanner}
+          {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
+          <section className="card p-4">
+            <h1 className="text-xl font-bold">Inspection summary</h1>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+              <SummaryTile label="Total items" value={tpl.items.length} />
+              <SummaryTile label="Completed" value={completedCount} />
+              <SummaryTile label="Top-up" value={topupCount} tone="warn" />
+              <SummaryTile label="Expired" value={expiredCount} tone="bad" />
+              <SummaryTile label="Missing" value={missingCount} tone="bad" />
+              <SummaryTile label="Remarks/issues" value={remarksOrIssueCount} tone="warn" />
+            </div>
+            <button type="button" onClick={() => goToItem(0)} className="btn btn-md btn-secondary mt-4 w-full">
+              Back to items
+            </button>
+          </section>
+
+          <section className="card p-4">
+            <h2 className="mb-2 font-semibold">Live box photo</h2>
+            <PhotoCapture
+              initialUrl={photo?.url ?? null}
+              onChange={(next) => {
+                setPhoto(next);
+                setSubmitError(null);
               }}
-              className="font-semibold underline"
-            >
-              Clear draft
+              disabled={submitting}
+            />
+          </section>
+
+          <label className="block">
+            <span className="label">Overall notes (optional)</span>
+            <textarea className="textarea" rows={3} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </label>
+        </main>
+
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
+          <div className="mx-auto max-w-md">
+            <button type="button" onClick={submit} disabled={submitting} className="btn btn-lg btn-primary w-full">
+              {submitting ? (
+                <>
+                  <Spinner className="h-5 w-5" /> Submitting...
+                </>
+              ) : (
+                'Submit Inspection'
+              )}
             </button>
           </div>
-        )}
+        </div>
+      </>
+    );
+  }
 
-        {submitError && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>
-        )}
+  return (
+    <>
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-md items-center gap-3 px-3 py-2">
+          <CompanyLogo className="h-6 w-auto max-w-[82px] shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold leading-tight">{tpl.box.box_code}</p>
+            <p className="truncate text-xs text-slate-500">{shortLocation}</p>
+          </div>
+          <div className="text-right text-xs font-semibold text-slate-600">
+            Item {currentIndex + 1} of {tpl.items.length}
+          </div>
+          <button type="button" onClick={() => setActiveSheet('details')} className="btn btn-ghost min-h-9 px-2 text-xs">
+            Details
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-md space-y-3 p-3 pb-28">
+        {draftBanner}
+        {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
+
+        <section className="card p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold">
+                Item {currentIndex + 1} of {tpl.items.length}
+              </p>
+              <p className="text-xs text-slate-500">
+                {checkedCount} checked - {pendingCount} pending
+              </p>
+            </div>
+            <button type="button" onClick={() => setActiveSheet('items')} className="btn btn-md btn-secondary">
+              View All Items
+            </button>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${progressPercent}%` }} />
+          </div>
+          <div className="mt-3 flex gap-1 overflow-hidden" aria-hidden>
+            {itemReviews.map((review, i) => (
+              <span
+                key={tpl.items[i]!.box_item_id}
+                className={`h-2 flex-1 rounded-full ${
+                  i === currentIndex
+                    ? 'bg-brand'
+                    : review.status === 'Issue found'
+                        ? 'bg-amber-400'
+                        : review.status === 'Completed'
+                          ? 'bg-emerald-400'
+                          : 'bg-slate-200'
+                }`}
+              />
+            ))}
+          </div>
+        </section>
 
         <div
           key={currentItem.box_item_id}
-          className={`inspection-step ${
-            stepDirection === 'backward' ? 'inspection-step-backward' : 'inspection-step-forward'
-          }`}
+          className={`inspection-step ${stepDirection === 'backward' ? 'inspection-step-backward' : 'inspection-step-forward'}`}
         >
-          <section className="card space-y-3 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase text-slate-500">
-                  Item {currentIndex + 1} of {tpl.items.length}
-                </p>
-                <h3 className="truncate text-lg font-bold">{currentItem.item_name}</h3>
-              </div>
-              <p className="shrink-0 text-sm font-medium text-slate-500">
-                {checkedCount}/{tpl.items.length} complete
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2" aria-label="Inspection item navigation">
-              {tpl.items.map((it, i) => {
-                const complete = !getItemValidationError(it, obs[it.box_item_id] ?? {});
-                const active = i === currentIndex;
-                return (
-                  <button
-                    key={it.box_item_id}
-                    type="button"
-                    onClick={() => goToItem(i)}
-                    className={`h-9 min-w-9 rounded-full border px-3 text-sm font-semibold ${
-                      active
-                        ? 'border-brand bg-brand text-white'
-                        : complete
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                          : 'border-slate-200 bg-white text-slate-500'
-                    }`}
-                    aria-current={active ? 'step' : undefined}
-                    aria-label={`Go to item ${i + 1}: ${it.item_name}`}
-                  >
-                    {i + 1}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <div className="mt-4">
-            <ChecklistCard
-              item={currentItem}
-              value={obs[currentItem.box_item_id] ?? {}}
-              onChange={setCurrentItem}
-              now={now}
-            />
-          </div>
+          <ChecklistCard item={currentItem} value={obs[currentItem.box_item_id] ?? {}} onChange={setCurrentItem} now={now} />
         </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={() => goToItem(currentIndex - 1)}
-            disabled={currentIndex === 0}
-            className="btn btn-lg btn-secondary"
-          >
-            Previous
-          </button>
-          <button
-            type="button"
-            onClick={nextItem}
-            disabled={currentIndex >= tpl.items.length - 1}
-            className="btn btn-lg btn-primary"
-          >
-            Next item
-          </button>
-        </div>
-
-        {/* Box photo */}
-        <section className="card p-4">
-          <h3 className="mb-2 font-semibold">Live box photo</h3>
-          <PhotoCapture
-            initialUrl={photo?.url ?? null}
-            onChange={(next) => {
-              setPhoto(next);
-              setSubmitError(null);
-            }}
-            disabled={submitting}
-          />
-        </section>
-
-        {/* Notes */}
-        <label className="block">
-          <span className="label">Overall notes (optional)</span>
-          <textarea
-            className="textarea"
-            rows={3}
-            maxLength={2000}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-        </label>
       </main>
 
-      {/* Sticky submit bar */}
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
-        <div className="mx-auto max-w-3xl">
-          <button onClick={submit} disabled={submitting} className="btn btn-lg btn-primary w-full">
-            {submitting ? (
-              <>
-                <Spinner className="h-5 w-5" /> Submitting…
-              </>
-            ) : (
-              'Submit inspection'
-            )}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
+        <div className="mx-auto grid max-w-md grid-cols-2 gap-3">
+          <button type="button" onClick={() => goToItem(currentIndex - 1)} disabled={currentIndex === 0} className="btn btn-lg btn-secondary">
+            Previous
+          </button>
+          <button type="button" onClick={nextItem} className="btn btn-lg btn-primary">
+            {currentIndex >= tpl.items.length - 1 ? 'Review' : 'Next item'}
           </button>
         </div>
       </div>
+
+      {activeSheet === 'details' && (
+        <BottomSheet title="Box details" onClose={() => setActiveSheet(null)}>
+          <BoxDetails tpl={tpl} me={me} guidanceNote={guidanceNote} />
+        </BottomSheet>
+      )}
+
+      {activeSheet === 'items' && (
+        <BottomSheet title="Checklist items" onClose={() => setActiveSheet(null)}>
+          <div className="max-h-[65vh] space-y-2 overflow-y-auto pr-1">
+            {tpl.items.map((item, i) => (
+              <button
+                key={item.box_item_id}
+                type="button"
+                onClick={() => {
+                  setActiveSheet(null);
+                  goToItem(i);
+                }}
+                className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold">
+                    {i + 1}. {item.item_name}
+                  </span>
+                  {itemReviews[i]!.detail && <span className="block text-xs text-slate-500">{itemReviews[i]!.detail}</span>}
+                </span>
+                <StatusChip review={itemReviews[i]!} incomplete={Boolean(itemValidationErrors[i])} />
+              </button>
+            ))}
+          </div>
+        </BottomSheet>
+      )}
     </>
+  );
+}
+
+function BoxDetails({
+  tpl,
+  me,
+  guidanceNote,
+}: {
+  tpl: InspectionTemplateResponse;
+  me: Me;
+  guidanceNote: string;
+}) {
+  return (
+    <div className="space-y-3 text-sm">
+      <dl className="grid grid-cols-3 gap-y-2">
+        <dt className="text-slate-500">Box code</dt>
+        <dd className="col-span-2 font-medium">{tpl.box.box_code}</dd>
+        <dt className="text-slate-500">Box name</dt>
+        <dd className="col-span-2 font-medium">{tpl.box.box_name}</dd>
+        <dt className="text-slate-500">Location</dt>
+        <dd className="col-span-2 font-medium">{tpl.box.location_description}</dd>
+        {tpl.box.area && (
+          <>
+            <dt className="text-slate-500">Area</dt>
+            <dd className="col-span-2 font-medium">{tpl.box.area}</dd>
+          </>
+        )}
+        <dt className="text-slate-500">Inspector</dt>
+        <dd className="col-span-2 font-medium">{me.full_name}</dd>
+        <dt className="text-slate-500">Last check</dt>
+        <dd className="col-span-2 font-medium">{formatDate(tpl.last_inspection?.created_at)}</dd>
+      </dl>
+      <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-600">{guidanceNote}</p>
+    </div>
+  );
+}
+
+function StatusChip({ review, incomplete }: { review: ItemReview; incomplete: boolean }) {
+  const label = incomplete && review.status !== 'Pending' ? `${review.label} - needs info` : review.label;
+  const cls =
+    review.status === 'Issue found'
+      ? 'bg-amber-100 text-amber-900'
+      : incomplete || review.status === 'Pending'
+        ? 'bg-slate-200 text-slate-700'
+        : 'bg-emerald-100 text-emerald-800';
+  return <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>{label}</span>;
+}
+
+function SummaryTile({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: number;
+  tone?: 'neutral' | 'warn' | 'bad';
+}) {
+  const cls =
+    tone === 'bad'
+      ? 'bg-red-50 text-red-800'
+      : tone === 'warn'
+        ? 'bg-amber-50 text-amber-900'
+        : 'bg-slate-50 text-slate-800';
+  return (
+    <div className={`rounded-xl px-3 py-2 ${cls}`}>
+      <p className="text-xs font-medium opacity-75">{label}</p>
+      <p className="text-2xl font-bold">{value}</p>
+    </div>
+  );
+}
+
+function BottomSheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-label={title}>
+      <button type="button" className="absolute inset-0 h-full w-full cursor-default" onClick={onClose} aria-label="Close" />
+      <section className="bottom-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-bold">{title}</h2>
+          <button type="button" onClick={onClose} className="btn btn-ghost min-h-10 px-3">
+            Close
+          </button>
+        </div>
+        {children}
+      </section>
+    </div>
   );
 }
 
@@ -436,22 +677,16 @@ function ResultView({
       <AppHeader title="Inspection submitted" subtitle={tpl.box.box_name} />
       <main className="mx-auto max-w-3xl space-y-4 p-4">
         <section className="card flex flex-col items-center gap-3 p-6 text-center">
-          <div className="text-5xl">
-            {result.overall_status === 'Pass' ? '✅' : result.overall_status === 'Fail' ? '⛔' : '⚠️'}
-          </div>
           <OverallBadge status={result.overall_status} />
           <p className="text-sm text-slate-500">
-            {s.ok} OK · {s.low_stock} low · {s.missing} missing · {s.expired} expired ·{' '}
-            {s.expiring_soon} expiring soon
+            {s.ok} OK - {s.low_stock} low - {s.missing} missing - {s.expired} expired - {s.expiring_soon} expiring soon
           </p>
         </section>
 
         <section className="card p-4">
-          <h3 className="mb-2 font-semibold">
-            Top-up requested ({result.topups_created})
-          </h3>
+          <h3 className="mb-2 font-semibold">Top-up requested ({result.topups_created})</h3>
           {result.topup_items.length === 0 ? (
-            <p className="text-sm text-slate-500">No items need a top-up. 🎉</p>
+            <p className="text-sm text-slate-500">No items need a top-up.</p>
           ) : (
             <ul className="divide-y divide-slate-100">
               {result.topup_items.map((t, i) => (
