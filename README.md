@@ -22,7 +22,7 @@ at the database level with Row Level Security - not by hiding buttons.
 - **Framework:** Next.js 15 (App Router) + TypeScript + Tailwind CSS, hosted on Vercel
 - **Database / Auth:** Supabase Postgres + Supabase Auth (email login)
 - **Images:** Cloudinary (item reference photos + live inspection photos), signed server-side
-- **Email:** Resend, triggered by Vercel Cron (`0 0 * * *` = 08:00 Malaysia)
+- **Email:** Brevo or Resend, triggered by Vercel Cron (`0 0 * * *` = 08:00 Malaysia)
 - **Mobile:** PWA (installable, offline app-shell, localStorage inspection drafts)
 
 ## Repository layout
@@ -67,7 +67,7 @@ tailwind.config.ts, postcss.config.mjs, vercel.json, .env.example
    project, run the three SQL files in order, create the first users, promote
    your admin.
 2. Copy `.env.example` to `.env.local` and fill in the keys (server-only
-   secrets stay out of `NEXT_PUBLIC_*`). Configure Cloudinary + Resend.
+   secrets stay out of `NEXT_PUBLIC_*`). Configure Cloudinary + Brevo/Resend.
 3. `npm install && npm run dev` and open http://localhost:3000 - you are routed
    to `/login`. Sign in to reach your boxes / reports / admin by role.
 4. Deploy to Vercel; set the same env vars; the cron runs daily automatically.

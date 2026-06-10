@@ -1,7 +1,8 @@
 // =============================================================================
-// Resend email helper (fetch-based - no SDK dependency). The API key is
-// server-only. Used by the reminder cron. All dynamic values are HTML-escaped
-// before interpolation as defense-in-depth against injection in the email body.
+// Email helper for reminder cron. Supports Brevo (free transactional tier) and
+// Resend through fetch-based APIs, so no SDK dependency is needed. API keys are
+// server-only. All dynamic values are HTML-escaped before interpolation as
+// defense-in-depth against injection in the email body.
 // =============================================================================
 
 import { PUBLIC_ENV, SERVER_ENV } from '@/lib/env';
@@ -30,6 +31,60 @@ export async function sendEmail(opts: {
   if (opts.to.length === 0) {
     return { ok: false, id: null, error: 'No recipients.' };
   }
+
+  const brevoApiKey = SERVER_ENV.brevoApiKey();
+  if (brevoApiKey) return sendBrevoEmail(brevoApiKey, opts);
+
+  return sendResendEmail(opts);
+}
+
+function parseSender(input: string): { name?: string; email: string } {
+  const m = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(input);
+  if (m) {
+    const name = m[1]?.trim();
+    return { name: name || undefined, email: m[2]!.trim() };
+  }
+  return { email: input.trim() };
+}
+
+async function sendBrevoEmail(
+  apiKey: string,
+  opts: { to: string[]; subject: string; html: string; text: string },
+): Promise<EmailResult> {
+  try {
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sender: parseSender(SERVER_ENV.reminderFromEmail()),
+        to: opts.to.map((email) => ({ email })),
+        subject: opts.subject,
+        htmlContent: opts.html,
+        textContent: opts.text,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      return { ok: false, id: null, error: `Brevo ${res.status}: ${body.slice(0, 200)}` };
+    }
+    const data = (await res.json()) as { messageId?: string };
+    return { ok: true, id: data.messageId ?? null };
+  } catch (err) {
+    return { ok: false, id: null, error: err instanceof Error ? err.message : 'send failed' };
+  }
+}
+
+async function sendResendEmail(opts: {
+  to: string[];
+  subject: string;
+  html: string;
+  text: string;
+}): Promise<EmailResult> {
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
