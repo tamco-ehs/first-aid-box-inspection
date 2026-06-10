@@ -23,6 +23,7 @@ export default function InspectPage() {
 }
 
 type LoadError = { type: 'forbidden' | 'notfound' | 'other'; message: string };
+type ValidationIssue = { message: string; itemIndex: number | null };
 
 function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const now = useMemo(() => new Date(), []);
@@ -37,6 +38,8 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<InspectionResult | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [lastEditedItemId, setLastEditedItemId] = useState<string | null>(null);
 
   // Load checklist + restore any saved draft.
   useEffect(() => {
@@ -82,6 +85,31 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
     });
   }, [obs, notes, photo, tpl, result, boxId]);
 
+  useEffect(() => {
+    if (!tpl) return;
+    if (currentIndex >= tpl.items.length) {
+      setCurrentIndex(Math.max(0, tpl.items.length - 1));
+    }
+  }, [tpl, currentIndex]);
+
+  useEffect(() => {
+    if (!tpl || !lastEditedItemId) return;
+    const item = tpl.items[currentIndex];
+    if (!item || item.box_item_id !== lastEditedItemId || currentIndex >= tpl.items.length - 1) return;
+
+    const err = getItemValidationError(item, obs[item.box_item_id] ?? {});
+    if (err) return;
+
+    const timer = window.setTimeout(() => {
+      setCurrentIndex((idx) => (idx === currentIndex ? Math.min(idx + 1, tpl.items.length - 1) : idx));
+      setLastEditedItemId(null);
+      setSubmitError(null);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 600);
+
+    return () => window.clearTimeout(timer);
+  }, [tpl, currentIndex, obs, lastEditedItemId]);
+
   if (loadError?.type === 'forbidden') {
     return <AccessBlocked message="You are not assigned to this first aid box." />;
   }
@@ -98,50 +126,61 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
     return <ResultView result={result} tpl={tpl} />;
   }
 
-  const setItem = (id: string, next: DraftObservation) => setObs((p) => ({ ...p, [id]: next }));
-
-  function markAllRemainingOk() {
-    setObs((prev) => {
-      const next = { ...prev };
-      for (const it of tpl!.items) {
-        if (hasObservation(it, next[it.box_item_id])) continue;
-        const base = next[it.box_item_id] ?? {};
-        if (it.measurement_type === 'quantity') {
-          next[it.box_item_id] = { ...base, observed_quantity: it.required_quantity ?? 0 };
-        } else if (it.measurement_type === 'volume_level') {
-          next[it.box_item_id] = { ...base, observed_volume_level: 'Full' };
-        } else {
-          next[it.box_item_id] = { ...base, observed_present_status: 'Present' };
-        }
-      }
-      return next;
-    });
+  function getItemValidationError(
+    item: InspectionTemplateResponse['items'][number],
+    value: DraftObservation,
+  ): string | null {
+    if (!hasObservation(item, value)) return `Check ${item.item_name} before continuing.`;
+    return validateObservation(toSpec(item), value);
   }
 
-  function validate(): string | null {
-    if (!photo) return 'Please take a live photo of the first aid box.';
-    const missing: string[] = [];
-    for (const it of tpl!.items) {
-      const o = obs[it.box_item_id] ?? {};
-      if (!hasObservation(it, o)) {
-        missing.push(it.item_name);
-        continue;
-      }
-      const err = validateObservation(toSpec(it), o);
-      if (err) return err;
+  function findValidationIssue(): ValidationIssue | null {
+    for (let i = 0; i < tpl!.items.length; i += 1) {
+      const it = tpl!.items[i]!;
+      const err = getItemValidationError(it, obs[it.box_item_id] ?? {});
+      if (err) return { message: err, itemIndex: i };
     }
-    if (missing.length > 0) {
-      return `${missing.length} item(s) still need to be checked (e.g. ${missing[0]}). Use "Mark remaining as OK" if they are fine.`;
-    }
+    if (!photo) return { message: 'Please take a live photo of the first aid box.', itemIndex: null };
     return null;
+  }
+
+  function showValidationIssue(issue: ValidationIssue): void {
+    if (issue.itemIndex !== null) setCurrentIndex(issue.itemIndex);
+    setLastEditedItemId(null);
+    setSubmitError(issue.message);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function goToItem(index: number): void {
+    setCurrentIndex(Math.min(Math.max(index, 0), tpl!.items.length - 1));
+    setLastEditedItemId(null);
+    setSubmitError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function nextItem(): void {
+    goToItem(currentIndex + 1);
+  }
+
+  function setCurrentItem(next: DraftObservation): void {
+    const item = tpl!.items[currentIndex]!;
+    const previous = obs[item.box_item_id] ?? {};
+    const changedInspectionValue =
+      previous.observed_quantity !== next.observed_quantity ||
+      previous.observed_volume_level !== next.observed_volume_level ||
+      previous.observed_present_status !== next.observed_present_status ||
+      previous.expiry_date !== next.expiry_date;
+
+    setObs((p) => ({ ...p, [item.box_item_id]: next }));
+    setLastEditedItemId(changedInspectionValue ? item.box_item_id : null);
+    setSubmitError(null);
   }
 
   async function submit() {
     if (submitting) return;
-    const err = validate();
-    if (err) {
-      setSubmitError(err);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    const issue = findValidationIssue();
+    if (issue) {
+      showValidationIssue(issue);
       return;
     }
     setSubmitting(true);
@@ -170,15 +209,22 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
       setResult(res);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
+      const localIssue = findValidationIssue();
+      if (localIssue) {
+        showValidationIssue(localIssue);
+        return;
+      }
       setSubmitError(
         e instanceof Error ? e.message : 'Submission failed. Your draft is saved — please retry.',
       );
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setSubmitting(false);
     }
   }
 
-  const checkedCount = tpl.items.filter((it) => hasObservation(it, obs[it.box_item_id])).length;
+  const checkedCount = tpl.items.filter((it) => !getItemValidationError(it, obs[it.box_item_id] ?? {})).length;
+  const currentItem = tpl.items[currentIndex] ?? tpl.items[0]!;
   const due = tpl.last_inspection
     ? computeDue({
         lastInspectionAt: tpl.last_inspection.created_at,
@@ -233,6 +279,8 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
                 setObs({});
                 setNotes('');
                 setPhoto(null);
+                setCurrentIndex(0);
+                setLastEditedItemId(null);
                 setDraftRestored(false);
               }}
               className="font-semibold underline"
@@ -246,33 +294,82 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>
         )}
 
-        {/* Progress + bulk action */}
-        <div className="flex items-center justify-between px-1">
-          <p className="text-sm text-slate-500">
-            {checkedCount}/{tpl.items.length} items checked
-          </p>
-          <button onClick={markAllRemainingOk} className="btn btn-secondary btn-md">
-            Mark remaining as OK
-          </button>
-        </div>
+        <section className="card space-y-3 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase text-slate-500">
+                Item {currentIndex + 1} of {tpl.items.length}
+              </p>
+              <h3 className="truncate text-lg font-bold">{currentItem.item_name}</h3>
+            </div>
+            <p className="shrink-0 text-sm font-medium text-slate-500">
+              {checkedCount}/{tpl.items.length} complete
+            </p>
+          </div>
 
-        {/* Checklist (rendered from the database template) */}
-        <div className="space-y-3">
-          {tpl.items.map((it) => (
-            <ChecklistCard
-              key={it.box_item_id}
-              item={it}
-              value={obs[it.box_item_id] ?? {}}
-              onChange={(next) => setItem(it.box_item_id, next)}
-              now={now}
-            />
-          ))}
+          <div className="flex flex-wrap gap-2" aria-label="Inspection item navigation">
+            {tpl.items.map((it, i) => {
+              const complete = !getItemValidationError(it, obs[it.box_item_id] ?? {});
+              const active = i === currentIndex;
+              return (
+                <button
+                  key={it.box_item_id}
+                  type="button"
+                  onClick={() => goToItem(i)}
+                  className={`h-9 min-w-9 rounded-full border px-3 text-sm font-semibold ${
+                    active
+                      ? 'border-brand bg-brand text-white'
+                      : complete
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-slate-200 bg-white text-slate-500'
+                  }`}
+                  aria-current={active ? 'step' : undefined}
+                  aria-label={`Go to item ${i + 1}: ${it.item_name}`}
+                >
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <ChecklistCard
+          item={currentItem}
+          value={obs[currentItem.box_item_id] ?? {}}
+          onChange={setCurrentItem}
+          now={now}
+        />
+
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => goToItem(currentIndex - 1)}
+            disabled={currentIndex === 0}
+            className="btn btn-lg btn-secondary"
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            onClick={nextItem}
+            disabled={currentIndex >= tpl.items.length - 1}
+            className="btn btn-lg btn-primary"
+          >
+            Next item
+          </button>
         </div>
 
         {/* Box photo */}
         <section className="card p-4">
           <h3 className="mb-2 font-semibold">Live box photo</h3>
-          <PhotoCapture initialUrl={photo?.url ?? null} onChange={setPhoto} disabled={submitting} />
+          <PhotoCapture
+            initialUrl={photo?.url ?? null}
+            onChange={(next) => {
+              setPhoto(next);
+              setSubmitError(null);
+            }}
+            disabled={submitting}
+          />
         </section>
 
         {/* Notes */}
