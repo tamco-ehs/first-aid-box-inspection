@@ -136,9 +136,10 @@ function inspectLink(boxId: string): string {
   return `${PUBLIC_ENV.appUrl()}/inspect/${boxId}`;
 }
 
-function dashboardLink(): string {
-  // The action dashboard (Phase 2 enhances /reports with ?tab=actions filters).
-  return `${PUBLIC_ENV.appUrl()}/reports`;
+function dashboardLink(boxId?: string): string {
+  // The action dashboard is /reports; deep-link to the action queue for this box.
+  const base = `${PUBLIC_ENV.appUrl()}/reports?tab=actions`;
+  return boxId ? `${base}&box_id=${encodeURIComponent(boxId)}` : base;
 }
 
 const EMAIL_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -204,7 +205,7 @@ export function buildActionEmail(ctx: ActionEmailContext): {
 } {
   const boxLabel = ctx.boxCode ? `${ctx.boxCode} - ${ctx.boxName}` : ctx.boxName;
   const shortLabel = ctx.boxCode ?? ctx.boxName;
-  const dashboardUrl = dashboardLink();
+  const dashboardUrl = dashboardLink(ctx.boxId);
   const link = inspectLink(ctx.boxId);
   const sections = groupActionItemsForAdmin(ctx.lines);
   const total = ctx.lines.length;

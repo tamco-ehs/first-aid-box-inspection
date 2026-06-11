@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/client/api.ts';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import type { Me, ReportsResponse } from '@/lib/client/types.ts';
+import type { Me, ReportsResponse, ReportTopup } from '@/lib/client/types.ts';
 import { downloadCsv, toCsv } from '@/lib/client/csv.ts';
 import { formatDate, formatDateTime, todayIso } from '@/lib/client/format.ts';
 import { RequireAuth } from '@/components/RequireAuth';
@@ -19,6 +19,15 @@ interface BoxLite {
 }
 
 type Tab = 'inspections' | 'issues' | 'topups' | 'usage';
+
+// Map the dashboard's action-oriented tab names (used in email/KPI deep links)
+// onto the report tabs that actually exist.
+function mapTab(t: string): Tab {
+  if (t === 'topups' || t === 'topup' || t === 'actions') return 'topups';
+  if (t === 'issues' || t === 'expiry' || t === 'verification') return 'issues';
+  if (t === 'usage') return 'usage';
+  return 'inspections';
+}
 
 export default function ReportsPage() {
   return <RequireAuth roles={['admin', 'viewer']}>{(me) => <Reports me={me} />}</RequireAuth>;
@@ -50,16 +59,26 @@ function Reports({ me }: { me: Me }) {
     [boxes],
   );
 
-  async function load() {
+  async function load(
+    overrides?: Partial<Record<'from' | 'to' | 'box_id' | 'area' | 'status' | 'issue_type', string>>,
+  ) {
     setLoading(true);
     setError(null);
+    const v = {
+      from: overrides?.from ?? from,
+      to: overrides?.to ?? to,
+      box_id: overrides?.box_id ?? boxId,
+      area: overrides?.area ?? area,
+      status: overrides?.status ?? status,
+      issue_type: overrides?.issue_type ?? issueType,
+    };
     const params = new URLSearchParams();
-    if (from) params.set('from', from);
-    if (to) params.set('to', to);
-    if (boxId) params.set('box_id', boxId);
-    if (area) params.set('area', area);
-    if (status) params.set('status', status);
-    if (issueType) params.set('issue_type', issueType);
+    if (v.from) params.set('from', v.from);
+    if (v.to) params.set('to', v.to);
+    if (v.box_id) params.set('box_id', v.box_id);
+    if (v.area) params.set('area', v.area);
+    if (v.status) params.set('status', v.status);
+    if (v.issue_type) params.set('issue_type', v.issue_type);
     try {
       const res = await api.reports(params.toString());
       setData(res);
@@ -77,18 +96,33 @@ function Reports({ me }: { me: Me }) {
       .select('id, box_code, box_name, area')
       .order('box_code')
       .then(({ data }) => setBoxes((data ?? []) as unknown as BoxLite[]));
-    load();
+    // Deep-link support: /reports?tab=actions&box_id=...&issue_type=expired
+    const sp = new URLSearchParams(window.location.search);
+    const urlBox = sp.get('box_id') || sp.get('box') || '';
+    const urlIssue = sp.get('issue_type') || '';
+    const urlTab = sp.get('tab') || '';
+    if (urlBox) setBoxId(urlBox);
+    if (urlIssue) setIssueType(urlIssue);
+    if (urlTab) setTab(mapTab(urlTab));
+    load({ box_id: urlBox || undefined, issue_type: urlIssue || undefined });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Jump from a KPI card to the relevant tab + filter, then refetch.
+  function onJump(nextTab: Tab, nextIssue?: string) {
+    setTab(nextTab);
+    setIssueType(nextIssue ?? '');
+    load({ issue_type: nextIssue ?? '' });
+  }
 
   const insights = useMemo(() => computeInsights(data), [data]);
 
   return (
     <>
-      <AppHeader title="Reports" subtitle={me.full_name} />
+      <AppHeader title="Action Dashboard" subtitle={me.full_name} />
       <main className="mx-auto max-w-5xl space-y-5 p-4">
         {/* Dashboard */}
-        {data && <Dashboard d={data.dashboard} />}
+        {data && <Dashboard d={data.dashboard} onJump={onJump} />}
 
         {/* Usage vs shortage insight */}
         {insights.length > 0 && (
@@ -155,7 +189,7 @@ function Reports({ me }: { me: Me }) {
             </Field>
           </div>
           <div className="mt-3 flex gap-2">
-            <button onClick={load} className="btn btn-md btn-primary">
+            <button onClick={() => load()} className="btn btn-md btn-primary">
               Apply filters
             </button>
             <button
@@ -181,7 +215,7 @@ function Reports({ me }: { me: Me }) {
             [
               ['inspections', 'Inspections'],
               ['issues', 'Item issues'],
-              ['topups', 'Top-ups'],
+              ['topups', 'Action queue'],
               ['usage', 'Usage'],
             ] as [Tab, string][]
           ).map(([key, label]) => (
@@ -206,7 +240,9 @@ function Reports({ me }: { me: Me }) {
           <>
             {tab === 'inspections' && <InspectionsReport data={data} boxById={boxById} />}
             {tab === 'issues' && <IssuesReport data={data} />}
-            {tab === 'topups' && <TopupsReport data={data} boxById={boxById} />}
+            {tab === 'topups' && (
+              <TopupsReport data={data} boxById={boxById} isAdmin={me.role === 'admin'} onChanged={load} />
+            )}
             {tab === 'usage' && <UsageReport data={data} boxById={boxById} />}
           </>
         )}
@@ -217,30 +253,65 @@ function Reports({ me }: { me: Me }) {
 
 /* ---------------------------------------------------------------- Dashboard */
 
-function Dashboard({ d }: { d: ReportsResponse['dashboard'] }) {
-  const cards: [string, number, 'ok' | 'warn' | 'bad' | 'neutral'][] = [
-    ['Total boxes', d.total_boxes, 'neutral'],
-    ['Inspected this month', d.boxes_inspected_this_month, 'ok'],
-    ['Overdue boxes', d.overdue_boxes, d.overdue_boxes > 0 ? 'bad' : 'ok'],
-    ['Needing top-up', d.boxes_needing_topup, d.boxes_needing_topup > 0 ? 'warn' : 'ok'],
-    ['With expired items', d.boxes_with_expired_items, d.boxes_with_expired_items > 0 ? 'bad' : 'ok'],
-    ['Expiring soon', d.boxes_with_expiring_soon_items, d.boxes_with_expiring_soon_items > 0 ? 'warn' : 'ok'],
-    ['Within 30 days', d.items_expiring_within_30_days, d.items_expiring_within_30_days > 0 ? 'warn' : 'ok'],
-    ['Missing expiry date', d.boxes_with_missing_expiry_dates, d.boxes_with_missing_expiry_dates > 0 ? 'bad' : 'ok'],
-    ['Label mismatch', d.boxes_with_expiry_label_mismatch, d.boxes_with_expiry_label_mismatch > 0 ? 'warn' : 'ok'],
-    ['Open top-ups', d.open_topup_requests, d.open_topup_requests > 0 ? 'warn' : 'ok'],
-    ['Usage this month', d.usage_logs_this_month, 'neutral'],
+function Dashboard({
+  d,
+  onJump,
+}: {
+  d: ReportsResponse['dashboard'];
+  onJump: (tab: Tab, issueType?: string) => void;
+}) {
+  type Card = { label: string; value: number; tone: 'ok' | 'warn' | 'bad' | 'neutral'; jump?: () => void };
+  const sev = (n: number, t: 'warn' | 'bad'): 'ok' | 'warn' | 'bad' => (n > 0 ? t : 'ok');
+
+  // Decision cards: "what needs action today", each filtering the queue below.
+  const decisionCards: Card[] = [
+    { label: 'Critical now', value: d.critical_now, tone: sev(d.critical_now, 'bad'), jump: () => onJump('issues', 'expired') },
+    { label: 'Top-up required', value: d.open_topup_requests, tone: sev(d.open_topup_requests, 'warn'), jump: () => onJump('topups') },
+    { label: 'Replacement', value: d.items_expired, tone: sev(d.items_expired, 'bad'), jump: () => onJump('issues', 'expired') },
+    { label: 'Expiring ≤30d', value: d.items_expiring_within_30_days, tone: sev(d.items_expiring_within_30_days, 'warn'), jump: () => onJump('issues', 'expiring_soon') },
+    { label: 'Expiry verification', value: d.items_expiry_verification, tone: sev(d.items_expiry_verification, 'warn'), jump: () => onJump('issues') },
+    { label: 'Baseline missing', value: d.items_baseline_missing, tone: sev(d.items_baseline_missing, 'warn'), jump: () => onJump('issues') },
+    { label: 'Overdue inspections', value: d.overdue_boxes, tone: sev(d.overdue_boxes, 'bad'), jump: () => onJump('inspections') },
+    { label: 'Admin review (photos)', value: d.items_missing_photo, tone: d.items_missing_photo > 0 ? 'warn' : 'neutral' },
   ];
+  const contextCards: Card[] = [
+    { label: 'Total boxes', value: d.total_boxes, tone: 'neutral' },
+    { label: 'Inspected this month', value: d.boxes_inspected_this_month, tone: 'ok' },
+    { label: 'Usage this month', value: d.usage_logs_this_month, tone: 'neutral' },
+  ];
+
+  const renderCard = (c: Card) => {
+    const inner = (
+      <>
+        <p className="text-2xl font-bold tabular-nums">{c.value}</p>
+        <p className="text-xs text-slate-500">{c.label}</p>
+        <span className={`badge mt-1 ${toneToClass(c.tone)}`}>&nbsp;</span>
+      </>
+    );
+    return c.jump ? (
+      <button
+        key={c.label}
+        type="button"
+        onClick={c.jump}
+        className="card p-3 text-left transition hover:border-slate-300 hover:shadow"
+      >
+        {inner}
+      </button>
+    ) : (
+      <div key={c.label} className="card p-3">
+        {inner}
+      </div>
+    );
+  };
+
   return (
-    <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {cards.map(([label, value, tone]) => (
-        <div key={label} className="card p-3">
-          <p className="text-2xl font-bold tabular-nums">{value}</p>
-          <p className="text-xs text-slate-500">{label}</p>
-          <span className={`badge mt-1 ${toneToClass(tone)}`}>&nbsp;</span>
-        </div>
-      ))}
-    </section>
+    <div className="space-y-3">
+      <div>
+        <p className="mb-2 text-sm font-semibold text-slate-700">What needs action today</p>
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">{decisionCards.map(renderCard)}</section>
+      </div>
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">{contextCards.map(renderCard)}</section>
+    </div>
   );
 }
 
@@ -379,11 +450,42 @@ function IssuesReport({ data }: { data: ReportsResponse }) {
 function TopupsReport({
   data,
   boxById,
+  isAdmin,
+  onChanged,
 }: {
   data: ReportsResponse;
   boxById: Map<string, BoxLite>;
+  isAdmin: boolean;
+  onChanged: () => void;
 }) {
   const rows = data.topup_requests;
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function setStatus(id: string, status: ReportTopup['status']) {
+    setBusyId(id);
+    setActionError(null);
+    try {
+      const sb = getSupabaseBrowserClient();
+      const { data: u } = await sb.auth.getUser();
+      const done = status === 'Completed';
+      const { error } = await sb
+        .from('topup_requests')
+        .update({
+          status,
+          completed_by: done ? u.user?.id ?? null : null,
+          completed_at: done ? new Date().toISOString() : null,
+        })
+        .eq('id', id);
+      if (error) throw new Error(error.message);
+      onChanged();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not update.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   function exportCsv() {
     const csv = toCsv(rows, [
       { key: 'requested_at', label: 'Requested', value: (r) => formatDateTime(r.requested_at) },
@@ -396,35 +498,56 @@ function TopupsReport({
     ]);
     downloadCsv(`topups-${todayIso()}.csv`, csv);
   }
-  if (rows.length === 0) return <Empty label="No top-up requests match these filters." />;
+  if (rows.length === 0) return <Empty label="No action items match these filters." />;
   return (
     <section>
       <ExportBar onExport={exportCsv} />
-      <div className="space-y-2 md:hidden">
-        {rows.map((r) => (
-          <div key={r.id} className="card p-3">
-            <div className="flex items-center justify-between">
-              <span className="font-medium">{r.item_name}</span>
-              {r.priority && <PriorityBadge priority={r.priority} />}
+      {actionError && (
+        <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{actionError}</p>
+      )}
+      <div className="space-y-2">
+        {rows.map((r) => {
+          const open = r.status === 'Open' || r.status === 'In Progress';
+          return (
+            <div key={r.id} className="card p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{r.item_name}</span>
+                {r.priority && <PriorityBadge priority={r.priority} />}
+              </div>
+              {r.reason && <p className="mt-0.5 text-sm text-slate-600">{r.reason}</p>}
+              <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span>{boxById.get(r.box_id)?.box_code ?? '—'}</span>
+                <Badge tone={r.status === 'Completed' ? 'ok' : r.status === 'Open' ? 'warn' : 'neutral'}>
+                  {r.status}
+                </Badge>
+                <span>{formatDate(r.requested_at)}</span>
+              </p>
+              {isAdmin && open && (
+                <div className="mt-2 flex gap-2">
+                  {r.status === 'Open' && (
+                    <button
+                      type="button"
+                      disabled={busyId === r.id}
+                      onClick={() => setStatus(r.id, 'In Progress')}
+                      className="btn btn-md btn-secondary"
+                    >
+                      Start
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busyId === r.id}
+                    onClick={() => setStatus(r.id, 'Completed')}
+                    className="btn btn-md bg-emerald-600 text-white hover:bg-emerald-700"
+                  >
+                    {busyId === r.id ? <Spinner className="h-4 w-4" /> : 'Mark complete'}
+                  </button>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-slate-500">
-              {boxById.get(r.box_id)?.box_code ?? '—'} · {r.status} · {formatDate(r.requested_at)}
-            </p>
-          </div>
-        ))}
+          );
+        })}
       </div>
-      <Table
-        head={['Requested', 'Box', 'Item', 'Priority', 'Status']}
-        rows={rows.map((r) => [
-          formatDate(r.requested_at),
-          boxById.get(r.box_id)?.box_code ?? '—',
-          r.item_name,
-          r.priority ? <PriorityBadge key="p" priority={r.priority} /> : '—',
-          <Badge key="s" tone={r.status === 'Completed' ? 'ok' : r.status === 'Open' ? 'warn' : 'neutral'}>
-            {r.status}
-          </Badge>,
-        ])}
-      />
     </section>
   );
 }

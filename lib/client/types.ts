@@ -159,6 +159,11 @@ export interface DashboardSummary {
   boxes_with_missing_expiry_dates: number;
   boxes_with_expiry_label_mismatch: number;
   items_expiring_within_30_days: number;
+  critical_now: number;
+  items_expired: number;
+  items_expiry_verification: number;
+  items_baseline_missing: number;
+  items_missing_photo: number;
   open_topup_requests: number;
   usage_logs_this_month: number;
 }

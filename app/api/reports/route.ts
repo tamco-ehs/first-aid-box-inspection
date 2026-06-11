@@ -131,6 +131,21 @@ async function buildDashboard(admin: Admin) {
     ((mismatchItems ?? []) as { box_id: string }[]).map((i) => i.box_id),
   ).size;
 
+  // Item-level action counts for the decision dashboard cards.
+  const { data: noPhotoItems } = await admin
+    .from('box_items_effective')
+    .select('id')
+    .eq('is_active', true)
+    .is('effective_item_photo_url', null);
+  const { data: criticalExpired } = await admin
+    .from('box_items_effective')
+    .select('id')
+    .eq('is_active', true)
+    .eq('is_critical', true)
+    .eq('has_expiry', true)
+    .not('expiry_date', 'is', null)
+    .lt('expiry_date', today);
+
   const usage_logs_this_month = await headCount(
     admin
       .from('first_aid_usage_logs')
@@ -148,6 +163,11 @@ async function buildDashboard(admin: Admin) {
     boxes_with_missing_expiry_dates,
     boxes_with_expiry_label_mismatch,
     items_expiring_within_30_days,
+    critical_now: (criticalExpired ?? []).length,
+    items_expired: (expiredItems ?? []).length,
+    items_expiry_verification: (mismatchItems ?? []).length,
+    items_baseline_missing: (missingExpiryDateItems ?? []).length,
+    items_missing_photo: (noPhotoItems ?? []).length,
     open_topup_requests,
     usage_logs_this_month,
   };

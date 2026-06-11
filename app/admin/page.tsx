@@ -35,7 +35,7 @@ function Admin({ me }: { me: Me }) {
         subtitle={me.full_name}
         right={
           <a href="/reports" className="btn btn-ghost btn-md text-slate-600">
-            Reports
+            Dashboard
           </a>
         }
       />
