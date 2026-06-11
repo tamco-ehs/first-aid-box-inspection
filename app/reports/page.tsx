@@ -6,27 +6,38 @@ import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import type { Me, ReportsResponse, ReportTopup } from '@/lib/client/types.ts';
 import { downloadCsv, toCsv } from '@/lib/client/csv.ts';
 import { formatDate, formatDateTime, todayIso } from '@/lib/client/format.ts';
+import { computeDue } from '@/lib/logic/due.ts';
 import { RequireAuth } from '@/components/RequireAuth';
 import { AppHeader } from '@/components/AppHeader';
 import { Spinner } from '@/components/Spinner';
-import { Badge, ItemStatusBadge, OverallBadge, PriorityBadge } from '@/components/StatusBadge';
+import { Badge, DueBadge, ItemStatusBadge, OverallBadge, PriorityBadge } from '@/components/StatusBadge';
 
 interface BoxLite {
   id: string;
   box_code: string;
   box_name: string;
+  location_description: string | null;
   area: string | null;
+  created_at: string;
+  inspection_frequency_days: number;
 }
 
-type Tab = 'inspections' | 'issues' | 'topups' | 'usage';
+type Tab = 'action' | 'boxes' | 'reports';
+type ActionFilter = 'all' | 'not_ready' | 'topup' | 'expiry' | 'overdue';
 
-// Map the dashboard's action-oriented tab names (used in email/KPI deep links)
-// onto the report tabs that actually exist.
+// Keep old email/KPI links working while making the dashboard action-first.
 function mapTab(t: string): Tab {
-  if (t === 'topups' || t === 'topup' || t === 'actions') return 'topups';
-  if (t === 'issues' || t === 'expiry' || t === 'verification') return 'issues';
-  if (t === 'usage') return 'usage';
-  return 'inspections';
+  if (t === 'boxes') return 'boxes';
+  if (t === 'reports' || t === 'inspections' || t === 'issues' || t === 'usage') return 'reports';
+  return 'action';
+}
+
+function mapActionFilter(raw: string): ActionFilter {
+  if (raw === 'not_ready' || raw === 'critical' || raw === 'expired' || raw === 'missing') return 'not_ready';
+  if (raw === 'topup' || raw === 'topup_required' || raw === 'low_stock') return 'topup';
+  if (raw === 'expiry' || raw === 'expiring_30d' || raw === 'expiring_soon' || raw === 'verification') return 'expiry';
+  if (raw === 'overdue' || raw === 'overdue_inspection') return 'overdue';
+  return 'all';
 }
 
 export default function ReportsPage() {
@@ -38,7 +49,9 @@ function Reports({ me }: { me: Me }) {
   const [data, setData] = useState<ReportsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('inspections');
+  const [tab, setTab] = useState<Tab>('action');
+  const [actionFilter, setActionFilter] = useState<ActionFilter>('all');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Filters
   const [from, setFrom] = useState('');
@@ -93,137 +106,137 @@ function Reports({ me }: { me: Me }) {
     // Box list (admin/viewer can read boxes via RLS) powers filters + id->code.
     getSupabaseBrowserClient()
       .from('boxes')
-      .select('id, box_code, box_name, area')
+      .select('id, box_code, box_name, location_description, area, created_at, inspection_frequency_days')
+      .eq('is_active', true)
       .order('box_code')
       .then(({ data }) => setBoxes((data ?? []) as unknown as BoxLite[]));
-    // Deep-link support: /reports?tab=actions&box_id=...&issue_type=expired
+    // Deep-link support: /admin/dashboard?tab=action&boxId=...&filter=topup_required
+    // plus the older /reports?tab=actions&box_id=...&issue_type=expired format.
     const sp = new URLSearchParams(window.location.search);
-    const urlBox = sp.get('box_id') || sp.get('box') || '';
+    const urlBox = sp.get('box_id') || sp.get('boxId') || sp.get('box') || '';
     const urlIssue = sp.get('issue_type') || '';
+    const urlFilter = sp.get('filter') || urlIssue || '';
     const urlTab = sp.get('tab') || '';
     if (urlBox) setBoxId(urlBox);
     if (urlIssue) setIssueType(urlIssue);
+    if (urlFilter) setActionFilter(mapActionFilter(urlFilter));
     if (urlTab) setTab(mapTab(urlTab));
     load({ box_id: urlBox || undefined, issue_type: urlIssue || undefined });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Jump from a KPI card to the relevant tab + filter. No refetch - the data is
-  // already loaded, so this filters client-side and is instant.
-  function onJump(nextTab: Tab, nextIssue?: string) {
+  function setRouteState(nextTab: Tab, nextFilter?: ActionFilter) {
     setTab(nextTab);
-    setIssueType(nextIssue ?? '');
+    if (nextFilter) setActionFilter(nextFilter);
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', nextTab);
+    if (nextFilter && nextFilter !== 'all') params.set('filter', nextFilter);
+    else params.delete('filter');
+    const next = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState(null, '', next);
+  }
+
+  function onJump(nextFilter: ActionFilter) {
+    setRouteState('action', nextFilter);
   }
 
   const insights = useMemo(() => computeInsights(data), [data]);
+  const filterPanel = (
+    <section className="card p-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <Field label="From">
+          <input type="date" max={todayIso()} className="input" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </Field>
+        <Field label="To">
+          <input type="date" max={todayIso()} className="input" value={to} onChange={(e) => setTo(e.target.value)} />
+        </Field>
+        <Field label="Box">
+          <select className="select" value={boxId} onChange={(e) => setBoxId(e.target.value)}>
+            <option value="">All</option>
+            {boxes.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.box_code}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Area">
+          <select className="select" value={area} onChange={(e) => setArea(e.target.value)}>
+            <option value="">All</option>
+            {areaOptions.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Status">
+          <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">All</option>
+            <option>Pass</option>
+            <option>Needs Restock</option>
+            <option>Fail</option>
+          </select>
+        </Field>
+        <Field label="Item issue">
+          <select className="select" value={issueType} onChange={(e) => setIssueType(e.target.value)}>
+            <option value="">All</option>
+            <option value="expired">Expired</option>
+            <option value="expiring_soon">Expiring soon</option>
+            <option value="missing">Missing</option>
+            <option value="low_stock">Low stock</option>
+            <option value="damaged">Damaged</option>
+            <option value="topup">Needs top-up</option>
+          </select>
+        </Field>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button onClick={() => load()} className="btn btn-md btn-primary">
+          Apply filters
+        </button>
+        <button
+          onClick={() => {
+            setFrom('');
+            setTo('');
+            setBoxId('');
+            setArea('');
+            setStatus('');
+            setIssueType('');
+            load({ from: '', to: '', box_id: '', area: '', status: '', issue_type: '' });
+          }}
+          className="btn btn-md btn-secondary"
+        >
+          Reset
+        </button>
+      </div>
+    </section>
+  );
 
   return (
     <>
-      <AppHeader title="Action Dashboard" subtitle={me.full_name} />
+      <AppHeader
+        title="Action Dashboard"
+        subtitle={me.full_name}
+        right={
+          <a href={me.role === 'admin' ? '/admin' : '/my-boxes'} className="btn btn-ghost btn-md text-slate-600">
+            Home
+          </a>
+        }
+      />
       <main className="mx-auto max-w-5xl space-y-5 p-4">
-        {/* Dashboard */}
-        {data && <Dashboard d={data.dashboard} onJump={onJump} />}
-
-        {/* Usage vs shortage insight */}
-        {insights.length > 0 && (
-          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-            <h2 className="font-semibold text-amber-900">High consumption items detected</h2>
-            <ul className="mt-1 space-y-1 text-sm text-amber-800">
-              {insights.map((i) => (
-                <li key={i.name}>
-                  <strong className="capitalize">{i.name}</strong> was taken {i.usageCount} times and flagged
-                  short in {i.shortageCount} inspection{i.shortageCount === 1 ? '' : 's'}.
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {/* Filters */}
-        <section className="card p-4">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-            <Field label="From">
-              <input type="date" max={todayIso()} className="input" value={from} onChange={(e) => setFrom(e.target.value)} />
-            </Field>
-            <Field label="To">
-              <input type="date" max={todayIso()} className="input" value={to} onChange={(e) => setTo(e.target.value)} />
-            </Field>
-            <Field label="Box">
-              <select className="select" value={boxId} onChange={(e) => setBoxId(e.target.value)}>
-                <option value="">All</option>
-                {boxes.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.box_code}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Area">
-              <select className="select" value={area} onChange={(e) => setArea(e.target.value)}>
-                <option value="">All</option>
-                {areaOptions.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Status">
-              <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="">All</option>
-                <option>Pass</option>
-                <option>Needs Restock</option>
-                <option>Fail</option>
-              </select>
-            </Field>
-            <Field label="Item issue">
-              <select className="select" value={issueType} onChange={(e) => setIssueType(e.target.value)}>
-                <option value="">All</option>
-                <option value="expired">Expired</option>
-                <option value="expiring_soon">Expiring soon</option>
-                <option value="missing">Missing</option>
-                <option value="low_stock">Low stock</option>
-                <option value="damaged">Damaged</option>
-                <option value="topup">Needs top-up</option>
-              </select>
-            </Field>
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button onClick={() => load()} className="btn btn-md btn-primary">
-              Apply filters
-            </button>
-            <button
-              onClick={() => {
-                setFrom('');
-                setTo('');
-                setBoxId('');
-                setArea('');
-                setStatus('');
-                setIssueType('');
-                setTimeout(load, 0);
-              }}
-              className="btn btn-md btn-secondary"
-            >
-              Reset
-            </button>
-          </div>
-        </section>
-
-        {/* Tabs */}
         <div className="flex flex-wrap gap-2">
           {(
             [
-              ['inspections', 'Inspections'],
-              ['issues', 'Item issues'],
-              ['topups', 'Action queue'],
-              ['usage', 'Usage'],
+              ['action', 'Action'],
+              ['boxes', 'Boxes'],
+              ['reports', 'Reports'],
             ] as [Tab, string][]
           ).map(([key, label]) => (
             <button
               key={key}
-              onClick={() => setTab(key)}
+              onClick={() => setRouteState(key)}
               className={`btn btn-md ${tab === key ? 'btn-primary' : 'btn-secondary'}`}
-              data-tour={key === 'topups' ? 'reports-action-tab' : undefined}
+              data-tour={key === 'action' ? 'reports-action-tab' : key === 'reports' ? 'reports-tab' : undefined}
             >
               {label}
             </button>
@@ -239,12 +252,24 @@ function Reports({ me }: { me: Me }) {
 
         {data && !loading && (
           <>
-            {tab === 'inspections' && <InspectionsReport data={data} boxById={boxById} />}
-            {tab === 'issues' && <IssuesReport data={data} issueType={issueType} boxById={boxById} />}
-            {tab === 'topups' && (
-              <TopupsReport data={data} boxById={boxById} isAdmin={me.role === 'admin'} onChanged={load} />
+            {tab === 'action' && (
+              <ActionTab
+                data={data}
+                boxes={boxes}
+                boxById={boxById}
+                filter={actionFilter}
+                onFilter={onJump}
+                advancedOpen={advancedOpen}
+                setAdvancedOpen={setAdvancedOpen}
+                advancedFilters={filterPanel}
+                isAdmin={me.role === 'admin'}
+                onChanged={load}
+              />
             )}
-            {tab === 'usage' && <UsageReport data={data} boxById={boxById} />}
+            {tab === 'boxes' && <BoxesReadiness data={data} boxes={boxes} boxById={boxById} onJump={onJump} />}
+            {tab === 'reports' && (
+              <ReportsArchive data={data} issueType={issueType} boxById={boxById} filters={filterPanel} insights={insights} />
+            )}
           </>
         )}
       </main>
@@ -252,141 +277,551 @@ function Reports({ me }: { me: Me }) {
   );
 }
 
-/* ---------------------------------------------------------------- Dashboard */
+/* ------------------------------------------------------------- Action view */
 
-function Dashboard({
-  d,
-  onJump,
+type ReportTone = 'ok' | 'warn' | 'bad' | 'neutral';
+type ActionCategory = 'not_ready' | 'topup' | 'expiry' | 'overdue';
+
+interface DashboardAction {
+  id: string;
+  category: ActionCategory;
+  priority: 'High' | 'Medium' | 'Low';
+  boxId: string;
+  boxCode: string;
+  area: string;
+  itemName: string;
+  issue: string;
+  requiredAction: string;
+  observed: string;
+  required: string;
+  expiryDate: string | null;
+  status: string;
+  sortRank: number;
+  requestedAt: string;
+  topupId?: string;
+  href: string;
+}
+
+function ActionTab({
+  data,
+  boxes,
+  boxById,
+  filter,
+  onFilter,
+  advancedOpen,
+  setAdvancedOpen,
+  advancedFilters,
+  isAdmin,
+  onChanged,
 }: {
-  d: ReportsResponse['dashboard'];
-  onJump: (tab: Tab, issueType?: string) => void;
+  data: ReportsResponse;
+  boxes: BoxLite[];
+  boxById: Map<string, BoxLite>;
+  filter: ActionFilter;
+  onFilter: (filter: ActionFilter) => void;
+  advancedOpen: boolean;
+  setAdvancedOpen: Dispatch<SetStateAction<boolean>>;
+  advancedFilters: ReactNode;
+  isAdmin: boolean;
+  onChanged: () => void;
 }) {
-  type Card = {
-    label: string;
-    value: number;
-    tone: 'ok' | 'warn' | 'bad' | 'neutral';
-    hint: string;
-    jump?: () => void;
-  };
-  const sev = (n: number, t: 'warn' | 'bad'): 'ok' | 'warn' | 'bad' => (n > 0 ? t : 'ok');
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const actions = useMemo(() => buildActionQueue(data, boxes, boxById), [data, boxes, boxById]);
+  const counts = useMemo(() => actionCounts(actions), [actions]);
+  const visible = actions.filter((a) => filter === 'all' || a.category === filter);
 
-  // Decision cards: "what needs action today", each filtering the queue below.
-  const decisionCards: Card[] = [
-    {
-      label: 'Critical now',
-      value: d.critical_now,
-      tone: sev(d.critical_now, 'bad'),
-      hint: 'Expired critical items',
-      jump: () => onJump('issues', 'expired'),
-    },
-    {
-      label: 'Top-up required',
-      value: d.open_topup_requests,
-      tone: sev(d.open_topup_requests, 'warn'),
-      hint: 'Open action queue',
-      jump: () => onJump('topups'),
-    },
-    {
-      label: 'Replacement',
-      value: d.items_expired,
-      tone: sev(d.items_expired, 'bad'),
-      hint: 'Expired inventory',
-      jump: () => onJump('issues', 'expired'),
-    },
-    {
-      label: 'Expiring <=30d',
-      value: d.items_expiring_within_30_days,
-      tone: sev(d.items_expiring_within_30_days, 'warn'),
-      hint: 'Plan before month end',
-      jump: () => onJump('issues', 'expiring_soon'),
-    },
-    {
-      label: 'Expiry verification',
-      value: d.items_expiry_verification,
-      tone: sev(d.items_expiry_verification, 'warn'),
-      hint: 'Label mismatch',
-      jump: () => onJump('issues'),
-    },
-    {
-      label: 'Baseline missing',
-      value: d.items_baseline_missing,
-      tone: sev(d.items_baseline_missing, 'warn'),
-      hint: 'No expiry date saved',
-      jump: () => onJump('issues'),
-    },
-    {
-      label: 'Overdue inspections',
-      value: d.overdue_boxes,
-      tone: sev(d.overdue_boxes, 'bad'),
-      hint: 'Boxes past due',
-      jump: () => onJump('inspections'),
-    },
-    {
-      label: 'Admin review',
-      value: d.items_missing_photo,
-      tone: d.items_missing_photo > 0 ? 'warn' : 'neutral',
-      hint: 'Items missing photos',
-    },
-  ];
-  const contextCards: Card[] = [
-    { label: 'Total boxes', value: d.total_boxes, tone: 'neutral', hint: 'Active coverage' },
-    { label: 'Inspected this month', value: d.boxes_inspected_this_month, tone: 'ok', hint: 'Completed rounds' },
-    { label: 'Usage this month', value: d.usage_logs_this_month, tone: 'neutral', hint: 'Medicine taken' },
-  ];
-
-  const renderCard = (c: Card) => {
-    const badge =
-      c.tone === 'bad' ? 'Act now' : c.tone === 'warn' ? 'Plan' : c.tone === 'ok' ? 'Clear' : 'Info';
-    const inner = (
-      <>
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <p className="text-2xl font-bold tabular-nums">{c.value}</p>
-            <p className="text-xs font-semibold text-slate-700">{c.label}</p>
-          </div>
-          <span className={`badge ${toneToClass(c.tone)}`}>{badge}</span>
-        </div>
-        <p className="mt-2 text-xs text-slate-500">{c.hint}</p>
-      </>
-    );
-    return c.jump ? (
-      <button
-        key={c.label}
-        type="button"
-        onClick={c.jump}
-        className="card p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow"
-      >
-        {inner}
-      </button>
-    ) : (
-      <div key={c.label} className="card p-3">
-        {inner}
-      </div>
-    );
-  };
+  async function markDone(action: DashboardAction) {
+    if (!action.topupId) return;
+    setBusyId(action.id);
+    setActionError(null);
+    try {
+      const sb = getSupabaseBrowserClient();
+      const { data: u } = await sb.auth.getUser();
+      const { error } = await sb
+        .from('topup_requests')
+        .update({
+          status: 'Completed',
+          completed_by: u.user?.id ?? null,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', action.topupId);
+      if (error) throw new Error(error.message);
+      onChanged();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not close action.');
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
-    <div className="space-y-3">
-      <div className="card border-brand/20 bg-white p-4" data-tour="dashboard-decision">
-        <p className="text-xs font-semibold uppercase text-brand">Decision view</p>
-        <h2 className="mt-1 text-lg font-bold">What needs action today</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Start with red cards, then work through the amber planning items.
-        </p>
-        <section className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {decisionCards.map(renderCard)}
-        </section>
+    <section className="space-y-4" data-tour="dashboard-decision">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <ReadinessCard label="Not Ready" count={counts.notReady} tone={counts.notReady > 0 ? 'bad' : 'ok'} onClick={() => onFilter('not_ready')} active={filter === 'not_ready'} />
+        <ReadinessCard label="Top-up Required" count={counts.topup} tone={counts.topup > 0 ? 'warn' : 'ok'} onClick={() => onFilter('topup')} active={filter === 'topup'} />
+        <ReadinessCard label="Expiring <=30d" count={counts.expiry} tone={counts.expiry > 0 ? 'warn' : 'ok'} onClick={() => onFilter('expiry')} active={filter === 'expiry'} />
+        <ReadinessCard label="Overdue Inspection" count={counts.overdue} tone={counts.overdue > 0 ? 'bad' : 'ok'} onClick={() => onFilter('overdue')} active={filter === 'overdue'} />
       </div>
-      <div>
-        <p className="mb-2 text-sm font-semibold text-slate-700">Context</p>
-        <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">{contextCards.map(renderCard)}</section>
+
+      <div className="card p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {(
+            [
+              ['all', 'All'],
+              ['not_ready', 'Not Ready'],
+              ['topup', 'Top-up'],
+              ['expiry', 'Expiry'],
+              ['overdue', 'Overdue'],
+            ] as [ActionFilter, string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onFilter(key)}
+              className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                filter === key ? 'border-brand bg-brand text-white' : 'border-slate-200 bg-white text-slate-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+          >
+            Filter
+          </button>
+        </div>
+        {advancedOpen && <div className="mt-3">{advancedFilters}</div>}
       </div>
-    </div>
+
+      {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{actionError}</p>}
+
+      <div className="flex items-end justify-between gap-3">
+        <SectionTitle
+          title="Today's Action Queue"
+          subtitle="Sorted by readiness risk first, then top-up, expiry and overdue inspection."
+        />
+        <span className="text-sm font-semibold text-slate-500">{visible.length} shown</span>
+      </div>
+
+      {visible.length === 0 ? (
+        <Empty label="No actions in this filter." />
+      ) : (
+        <div className="space-y-3">
+          {visible.map((action) => (
+            <ActionCard
+              key={action.id}
+              action={action}
+              canClose={isAdmin && Boolean(action.topupId)}
+              busy={busyId === action.id}
+              onDone={() => markDone(action)}
+            />
+          ))}
+        </div>
+      )}
+
+      <MasterDataCleanup dashboard={data.dashboard} />
+    </section>
   );
 }
 
-function toneToClass(t: 'ok' | 'warn' | 'bad' | 'neutral') {
+function ReadinessCard({
+  label,
+  count,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  tone: ReportTone;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const badge = tone === 'bad' ? 'Act now' : tone === 'warn' ? 'Plan' : 'Clear';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`card p-3 text-left transition hover:-translate-y-0.5 hover:shadow ${
+        active ? 'border-brand ring-2 ring-brand/20' : ''
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-2xl font-bold tabular-nums">{count}</p>
+          <p className="text-xs font-semibold text-slate-700">{label}</p>
+        </div>
+        <span className={`badge ${toneToClass(tone)}`}>{badge}</span>
+      </div>
+    </button>
+  );
+}
+
+function ActionCard({
+  action,
+  canClose,
+  busy,
+  onDone,
+}: {
+  action: DashboardAction;
+  canClose: boolean;
+  busy: boolean;
+  onDone: () => void;
+}) {
+  return (
+    <article className="card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <PriorityBadge priority={action.priority} />
+          <p className="mt-2 text-sm font-semibold text-slate-500">
+            {action.boxCode} | {action.area}
+          </p>
+        </div>
+        <Badge tone={actionTone(action.category)}>{action.status}</Badge>
+      </div>
+
+      <h3 className="mt-3 text-lg font-bold">{action.itemName}</h3>
+      <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+        <MiniFact label="Issue" value={action.issue} strong />
+        <MiniFact label="Action" value={action.requiredAction} strong />
+        <MiniFact label="Observed" value={action.observed} />
+        <MiniFact label="Required" value={action.required} />
+        {action.expiryDate && <MiniFact label="Expiry" value={formatDate(action.expiryDate)} />}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {canClose && (
+          <button type="button" className="btn btn-md bg-emerald-600 text-white hover:bg-emerald-700" onClick={onDone} disabled={busy}>
+            {busy ? <Spinner className="h-4 w-4" /> : 'Mark done'}
+          </button>
+        )}
+        <a href={action.href} className="btn btn-md btn-secondary">
+          View
+        </a>
+      </div>
+    </article>
+  );
+}
+
+function MasterDataCleanup({ dashboard }: { dashboard: ReportsResponse['dashboard'] }) {
+  const incomplete = dashboard.items_expiry_verification + dashboard.items_baseline_missing;
+  return (
+    <section className="card p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-semibold">Master Data Cleanup</h2>
+          <div className="mt-2 flex flex-wrap gap-2 text-sm">
+            <Badge tone={dashboard.items_missing_photo > 0 ? 'warn' : 'ok'}>
+              {dashboard.items_missing_photo} missing reference photo
+            </Badge>
+            <Badge tone={dashboard.items_baseline_missing > 0 ? 'warn' : 'ok'}>
+              {dashboard.items_baseline_missing} expiry baseline missing
+            </Badge>
+            <Badge tone={incomplete > 0 ? 'warn' : 'ok'}>{incomplete} incomplete master data</Badge>
+          </div>
+        </div>
+        <a href="/admin?tab=box-items" className="btn btn-md btn-secondary">
+          Review
+        </a>
+      </div>
+    </section>
+  );
+}
+
+function toneToClass(t: ReportTone) {
   return t === 'ok' ? 'status-ok' : t === 'warn' ? 'status-warn' : t === 'bad' ? 'status-bad' : 'status-neutral';
+}
+
+function actionTone(category: ActionCategory): ReportTone {
+  return category === 'not_ready' || category === 'overdue' ? 'bad' : 'warn';
+}
+
+function ReportsArchive({
+  data,
+  issueType,
+  boxById,
+  filters,
+  insights,
+}: {
+  data: ReportsResponse;
+  issueType: string;
+  boxById: Map<string, BoxLite>;
+  filters: ReactNode;
+  insights: { name: string; usageCount: number; shortageCount: number }[];
+}) {
+  return (
+    <section className="space-y-5">
+      {filters}
+      {insights.length > 0 && (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <h2 className="font-semibold text-amber-900">High consumption items detected</h2>
+          <ul className="mt-1 space-y-1 text-sm text-amber-800">
+            {insights.map((i) => (
+              <li key={i.name}>
+                <strong className="capitalize">{i.name}</strong> was taken {i.usageCount} times and flagged short in{' '}
+                {i.shortageCount} inspection{i.shortageCount === 1 ? '' : 's'}.
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <SectionTitle title="Inspection history and audit PDFs" subtitle="Auditor evidence lives here, away from the daily action queue." />
+      <InspectionsReport data={data} boxById={boxById} />
+      <SectionTitle title="Usage this month" subtitle="Usage logs and CSV export for historical review." />
+      <UsageReport data={data} boxById={boxById} />
+      <SectionTitle title="Historical item issues" subtitle="Expiry, shortage and verification records for traceability." />
+      <IssuesReport data={data} issueType={issueType} boxById={boxById} />
+    </section>
+  );
+}
+
+function BoxesReadiness({
+  data,
+  boxes,
+  boxById,
+}: {
+  data: ReportsResponse;
+  boxes: BoxLite[];
+  boxById: Map<string, BoxLite>;
+  onJump: (filter: ActionFilter) => void;
+}) {
+  const actions = useMemo(() => buildActionQueue(data, boxes, boxById), [data, boxes, boxById]);
+  const actionByBox = useMemo(() => {
+    const map = new Map<string, DashboardAction[]>();
+    for (const action of actions) {
+      const list = map.get(action.boxId) ?? [];
+      list.push(action);
+      map.set(action.boxId, list);
+    }
+    return map;
+  }, [actions]);
+  const lastByBox = useMemo(() => latestInspectionByBox(data.inspections), [data.inspections]);
+  const rows = boxes
+    .map((box) => {
+      const due = computeDue({
+        lastInspectionAt: lastByBox.get(box.id) ?? null,
+        boxCreatedAt: box.created_at,
+        frequencyDays: box.inspection_frequency_days,
+        now: new Date(),
+      });
+      const boxActions = actionByBox.get(box.id) ?? [];
+      const notReady = boxActions.some((a) => a.category === 'not_ready');
+      const readiness = due.due_status === 'Overdue' ? 'Overdue' : notReady ? 'Not ready' : boxActions.length > 0 ? 'Action required' : 'Ready';
+      const tone: ReportTone = readiness === 'Ready' ? 'ok' : readiness === 'Action required' ? 'warn' : 'bad';
+      return { box, due, boxActions, readiness, tone };
+    })
+    .sort((a, b) => readinessRank(a.readiness) - readinessRank(b.readiness) || a.box.box_code.localeCompare(b.box.box_code));
+
+  return (
+    <section className="space-y-3">
+      <SectionTitle title="Box readiness" subtitle="Scan by first aid box, then open the action queue for the boxes that need work." />
+      {rows.map(({ box, due, boxActions, readiness, tone }) => (
+        <article key={box.id} className="card p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-bold">{box.box_code}</h2>
+                <Badge tone={tone}>{readiness}</Badge>
+              </div>
+              <p className="text-sm text-slate-600">
+                {box.box_name}{box.area ? ` - ${box.area}` : ''}
+              </p>
+            </div>
+            <a href={`/admin/dashboard?tab=action&box_id=${encodeURIComponent(box.id)}`} className="btn btn-md btn-secondary">
+              View
+            </a>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <MiniFact label="Last inspection" value={formatDate(lastByBox.get(box.id) ?? null)} />
+            <MiniFact label="Open actions" value={String(boxActions.length)} strong={boxActions.length > 0} />
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">Inspection status</p>
+              <div className="mt-1">
+                <DueBadge status={due.due_status} daysOverdue={due.days_overdue} />
+              </div>
+            </div>
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function buildActionQueue(data: ReportsResponse, boxes: BoxLite[], boxById: Map<string, BoxLite>): DashboardAction[] {
+  const actions: DashboardAction[] = [];
+  const now = new Date();
+  const today = todayIso();
+  const in30 = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const activeTopups = data.topup_requests.filter((r) => r.status === 'Open' || r.status === 'In Progress');
+  const activeTopupKeys = new Set(activeTopups.map((r) => actionKey(r.box_id, r.item_name)));
+
+  for (const r of activeTopups) {
+    const box = boxById.get(r.box_id);
+    const category = classifyTopup(r);
+    const priority = r.priority ?? (category === 'not_ready' ? 'High' : 'Medium');
+    actions.push({
+      id: `topup:${r.id}`,
+      category,
+      priority,
+      boxId: r.box_id,
+      boxCode: boxLabel(box, r.box_id),
+      area: box?.area ?? 'Unassigned area',
+      itemName: r.item_name,
+      issue: r.reason ?? topupIssueFallback(r),
+      requiredAction: topupRequiredAction(r, category),
+      observed: topupObservedText(r),
+      required: topupRequiredText(r),
+      expiryDate: r.expiry_date,
+      status: r.status,
+      sortRank: categoryRank(category, priority),
+      requestedAt: r.requested_at,
+      topupId: r.id,
+      href: `/admin/dashboard?tab=action&box_id=${encodeURIComponent(r.box_id)}`,
+    });
+  }
+
+  for (const r of data.expiry_items) {
+    if (activeTopupKeys.has(actionKey(r.box_id, r.item_name))) continue;
+    if (r.expiry_status === 'Expiring soon' && (!r.expiry_date || r.expiry_date > in30)) continue;
+    const box = boxById.get(r.box_id);
+    const category: ActionCategory = r.expiry_status === 'Expired' ? 'not_ready' : 'expiry';
+    const priority = r.expiry_status === 'Expired' ? 'High' : 'Medium';
+    actions.push({
+      id: `expiry:${r.id}`,
+      category,
+      priority,
+      boxId: r.box_id,
+      boxCode: boxLabel(box, r.box_id),
+      area: box?.area ?? 'Unassigned area',
+      itemName: r.item_name,
+      issue: expiryIssueText(r.expiry_status),
+      requiredAction: expiryAction(r.expiry_status),
+      observed: r.expiry_status,
+      required: 'Valid expiry record',
+      expiryDate: r.expiry_date,
+      status: r.expiry_status,
+      sortRank: categoryRank(category, priority) + (r.expiry_status === 'No expiry date recorded' ? 3 : 0),
+      requestedAt: r.last_verified_date ?? today,
+      href: `/admin?tab=box-items`,
+    });
+  }
+
+  const lastByBox = latestInspectionByBox(data.inspections);
+  for (const box of boxes) {
+    const due = computeDue({
+      lastInspectionAt: lastByBox.get(box.id) ?? null,
+      boxCreatedAt: box.created_at,
+      frequencyDays: box.inspection_frequency_days,
+      now,
+    });
+    if (due.due_status !== 'Overdue') continue;
+    actions.push({
+      id: `overdue:${box.id}`,
+      category: 'overdue',
+      priority: 'High',
+      boxId: box.id,
+      boxCode: box.box_code,
+      area: box.area ?? 'Unassigned area',
+      itemName: 'Inspection overdue',
+      issue: `${due.days_overdue} day${due.days_overdue === 1 ? '' : 's'} overdue`,
+      requiredAction: 'Complete inspection now',
+      observed: formatDate(lastByBox.get(box.id) ?? null),
+      required: `Every ${box.inspection_frequency_days} days`,
+      expiryDate: null,
+      status: 'Overdue',
+      sortRank: categoryRank('overdue', 'High'),
+      requestedAt: due.next_due_date,
+      href: `/inspect/${box.id}`,
+    });
+  }
+
+  return actions.sort((a, b) => a.sortRank - b.sortRank || new Date(a.requestedAt).getTime() - new Date(b.requestedAt).getTime());
+}
+
+function actionCounts(actions: DashboardAction[]) {
+  return {
+    notReady: actions.filter((a) => a.category === 'not_ready').length,
+    topup: actions.filter((a) => a.category === 'topup').length,
+    expiry: actions.filter((a) => a.category === 'expiry').length,
+    overdue: actions.filter((a) => a.category === 'overdue').length,
+  };
+}
+
+function latestInspectionByBox(rows: ReportsResponse['inspections']) {
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    if (!map.has(row.box_id)) map.set(row.box_id, row.created_at);
+  }
+  return map;
+}
+
+function actionKey(boxId: string, itemName: string) {
+  return `${boxId}:${itemName.trim().toLowerCase()}`;
+}
+
+function categoryRank(category: ActionCategory, priority: 'High' | 'Medium' | 'Low') {
+  const categoryOrder: Record<ActionCategory, number> = { not_ready: 0, topup: 2, expiry: 3, overdue: 4 };
+  const priorityOrder: Record<'High' | 'Medium' | 'Low', number> = { High: 0, Medium: 1, Low: 2 };
+  return categoryOrder[category] * 10 + priorityOrder[priority];
+}
+
+function classifyTopup(r: ReportTopup): ActionCategory {
+  const text = `${r.reason ?? ''} ${r.item_name}`.toLowerCase();
+  if (/expired|missing|empty|damaged|out of stock|quantity 0/.test(text)) return 'not_ready';
+  if (/expiring|expiry/.test(text)) return 'expiry';
+  return 'topup';
+}
+
+function topupIssueFallback(r: ReportTopup) {
+  if (r.observed_quantity !== null && r.observed_quantity !== undefined && r.required_quantity !== null && r.required_quantity !== undefined) {
+    return r.observed_quantity < r.required_quantity ? 'Quantity below required' : 'Restock requested';
+  }
+  if (r.observed_volume_level) return `Volume ${r.observed_volume_level.toLowerCase()}`;
+  return 'Top-up requested';
+}
+
+function topupRequiredAction(r: ReportTopup, category: ActionCategory) {
+  const unit = r.unit?.trim() || 'pcs';
+  if (category === 'not_ready') return /expired/i.test(r.reason ?? '') ? 'Replace item now' : 'Issue or replace before box is ready';
+  if (category === 'expiry') return 'Plan replacement before expiry';
+  if (r.required_quantity != null && r.observed_quantity != null && r.required_quantity > r.observed_quantity) {
+    return `Top up ${r.required_quantity - r.observed_quantity} ${unit}`;
+  }
+  if (r.observed_volume_level) return 'Top up or replace';
+  return 'Top up to required level';
+}
+
+function topupObservedText(r: ReportTopup) {
+  if (r.observed_quantity !== null && r.observed_quantity !== undefined) {
+    return `${r.observed_quantity}${r.unit ? ` ${r.unit}` : ''}`;
+  }
+  return r.observed_volume_level ?? '-';
+}
+
+function topupRequiredText(r: ReportTopup) {
+  if (r.required_quantity !== null && r.required_quantity !== undefined) {
+    return `${r.required_quantity}${r.unit ? ` ${r.unit}` : ''}`;
+  }
+  return r.expiry_date ? 'Before expiry' : '-';
+}
+
+function expiryIssueText(status: ReportsResponse['expiry_items'][number]['expiry_status']) {
+  if (status === 'Expired') return 'Item expired';
+  if (status === 'Expiring soon') return 'Expiring within 30 days';
+  if (status === 'Expiry label mismatch') return 'Expiry label mismatch';
+  if (status === 'No expiry date recorded') return 'No expiry baseline recorded';
+  return status;
+}
+
+function readinessRank(status: string) {
+  if (status === 'Not ready') return 0;
+  if (status === 'Overdue') return 1;
+  if (status === 'Action required') return 2;
+  return 3;
 }
 
 /* --------------------------------------------------------------- Subreports */
@@ -886,8 +1321,6 @@ function UsageReport({
 }
 
 /* -------------------------------------------------------------------- Report helpers */
-
-type ReportTone = 'ok' | 'warn' | 'bad' | 'neutral';
 
 function ReportSummary({
   items,

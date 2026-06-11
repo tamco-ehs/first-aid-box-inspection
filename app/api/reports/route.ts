@@ -312,26 +312,30 @@ export async function GET(req: Request): Promise<Response> {
 
 async function attachTopupPhotos(admin: Admin, rows: Record<string, unknown>[]) {
   const boxIds = [...new Set(rows.map((row) => String(row.box_id ?? '')).filter(Boolean))];
-  if (boxIds.length === 0) return rows.map((row) => ({ ...row, item_photo_url: null }));
+  if (boxIds.length === 0) return rows.map((row) => ({ ...row, item_photo_url: null, unit: null }));
 
   const { data, error } = await admin
     .from('box_items_effective')
-    .select('box_id, item_name, effective_item_photo_url')
+    .select('box_id, item_name, unit, effective_item_photo_url')
     .in('box_id', boxIds)
     .eq('is_active', true);
   if (error) throw new Error(error.message);
 
-  const photos = new Map(
-    ((data ?? []) as { box_id: string; item_name: string; effective_item_photo_url: string | null }[]).map((row) => [
+  const itemMeta = new Map(
+    ((data ?? []) as { box_id: string; item_name: string; unit: string | null; effective_item_photo_url: string | null }[]).map((row) => [
       topupPhotoKey(row.box_id, row.item_name),
-      row.effective_item_photo_url,
+      { unit: row.unit, item_photo_url: row.effective_item_photo_url },
     ]),
   );
 
-  return rows.map((row) => ({
-    ...row,
-    item_photo_url: photos.get(topupPhotoKey(String(row.box_id ?? ''), String(row.item_name ?? ''))) ?? null,
-  }));
+  return rows.map((row) => {
+    const meta = itemMeta.get(topupPhotoKey(String(row.box_id ?? ''), String(row.item_name ?? '')));
+    return {
+      ...row,
+      item_photo_url: meta?.item_photo_url ?? null,
+      unit: meta?.unit ?? null,
+    };
+  });
 }
 
 function topupPhotoKey(boxId: string, itemName: string) {

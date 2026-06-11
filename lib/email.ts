@@ -137,8 +137,8 @@ function inspectLink(boxId: string): string {
 }
 
 function dashboardLink(boxId?: string): string {
-  // The action dashboard is /reports; deep-link to the action queue for this box.
-  const base = `${PUBLIC_ENV.appUrl()}/reports?tab=actions`;
+  // Deep-link to the lean action queue. /reports still exists as a compatibility route.
+  const base = `${PUBLIC_ENV.appUrl()}/admin/dashboard?tab=action`;
   return boxId ? `${base}&box_id=${encodeURIComponent(boxId)}` : base;
 }
 

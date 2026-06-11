@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Me } from '@/lib/client/types.ts';
 import { RequireAuth } from '@/components/RequireAuth';
 import { AppHeader } from '@/components/AppHeader';
@@ -28,13 +28,20 @@ export default function AdminPage() {
 
 function Admin({ me }: { me: Me }) {
   const [tab, setTab] = useState<Tab>('boxes');
+
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const urlTab = sp.get('tab');
+    if (TABS.some(([key]) => key === urlTab)) setTab(urlTab as Tab);
+  }, []);
+
   return (
     <>
       <AppHeader
         title="Admin"
         subtitle={me.full_name}
         right={
-          <a href="/reports" className="btn btn-ghost btn-md text-slate-600" data-tour="admin-reports-link">
+          <a href="/admin/dashboard?tab=action" className="btn btn-ghost btn-md text-slate-600" data-tour="admin-reports-link">
             Dashboard
           </a>
         }

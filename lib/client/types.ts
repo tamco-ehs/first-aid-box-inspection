@@ -208,6 +208,11 @@ export interface ReportTopup {
   item_name: string;
   item_photo_url: string | null;
   reason: string | null;
+  required_quantity: number | null;
+  observed_quantity: number | null;
+  observed_volume_level: VolumeLevel | null;
+  expiry_date: string | null;
+  unit: string | null;
   priority: Priority | null;
   status: 'Open' | 'In Progress' | 'Completed' | 'Rejected';
   requested_at: string;

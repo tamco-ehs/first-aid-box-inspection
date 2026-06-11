@@ -138,7 +138,8 @@ function pathMatches(pathname: string, stepPath?: string) {
 function stepsFor(role: Role, pathname: string): TourStep[] {
   if (pathname.startsWith('/inspect/')) return inspectionSteps();
   if (role === 'first_aider') return firstAiderSteps();
-  if (pathname.startsWith('/reports') || role === 'viewer') return reportSteps();
+  if (pathname.startsWith('/admin/dashboard')) return reportSteps('/admin/dashboard');
+  if (pathname.startsWith('/reports') || role === 'viewer') return reportSteps('/reports');
   if (role === 'admin') return adminSteps();
   return [];
 }
@@ -205,7 +206,7 @@ function adminSteps(): TourStep[] {
     },
     {
       title: 'Dashboard is for decisions and audit',
-      body: 'The dashboard shows what needs action and lets you download inspection audit PDFs for auditors.',
+      body: 'The dashboard opens on the Action tab, then keeps box readiness and audit reports one tap away.',
       selector: '[data-tour="admin-reports-link"]',
       path: '/admin',
       pathLabel: 'Open admin',
@@ -213,28 +214,28 @@ function adminSteps(): TourStep[] {
   ];
 }
 
-function reportSteps(): TourStep[] {
+function reportSteps(path: '/reports' | '/admin/dashboard'): TourStep[] {
   return [
     {
-      title: 'Start with the decision view',
-      body: 'These cards show the important counts first: critical items, top-ups, replacements, expiry checks, and overdue inspections.',
+      title: 'Start with action',
+      body: 'The four cards answer what is not ready, what needs top-up, what expires within 30 days, and what inspection is overdue.',
       selector: '[data-tour="dashboard-decision"]',
-      path: '/reports',
-      pathLabel: 'Open reports',
+      path,
+      pathLabel: 'Open dashboard',
     },
     {
-      title: 'Action queue is the stock workflow',
-      body: 'Use Action queue to issue stock by box. Tick only what you give out now and leave waiting-stock items open.',
+      title: 'Use quick filters',
+      body: 'Tap the chips to narrow the action queue without opening a large filter panel.',
       selector: '[data-tour="reports-action-tab"]',
-      path: '/reports',
-      pathLabel: 'Open reports',
+      path,
+      pathLabel: 'Open dashboard',
     },
     {
-      title: 'Download audit PDFs',
-      body: 'Each inspection row has a PDF button with timestamp, inspection details, item results, corrective actions, and an audit fingerprint.',
-      selector: '[data-tour="inspection-pdf"]',
-      path: '/reports',
-      pathLabel: 'Open reports',
+      title: 'Reports hold the evidence',
+      body: 'Open Reports when you need inspection history, CSV exports, usage records, or audit PDFs.',
+      selector: '[data-tour="reports-tab"]',
+      path,
+      pathLabel: 'Open dashboard',
     },
   ];
 }
