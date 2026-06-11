@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { api } from '@/lib/client/api.ts';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import type { Me, ReportsResponse, ReportTopup } from '@/lib/client/types.ts';
@@ -524,26 +524,34 @@ function IssuesReport({
         <div className="space-y-2">
           <SectionTitle
             title="Current inventory reminders"
-            subtitle="Live box-level expiry records that need attention, regardless of the last inspection."
+            subtitle="Grouped by box so stock can be prepared and issued in one trip."
           />
-          {expiryRows.map((r) => {
-            const box = boxById.get(r.box_id);
+          {groupExpiryByBox(expiryRows).map(([boxId, items]) => {
+            const box = boxById.get(boxId);
+            const urgent = items.filter((r) => expiryTone(r.expiry_status) === 'bad').length;
             return (
-              <div key={r.id} className="card p-4 transition duration-200 hover:border-slate-300 hover:shadow">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div key={boxId} className="card overflow-hidden">
+                <div className="flex flex-col gap-2 border-b border-slate-100 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-xs font-semibold text-slate-500">{boxLabel(box, r.box_id)}</p>
-                    <h3 className="text-base font-bold">{r.item_name}</h3>
+                    <h3 className="text-base font-bold">{boxLabel(box, boxId)}</h3>
                     <p className="text-sm text-slate-600">
                       {box?.box_name ?? 'Unknown box'}{box?.area ? ` - ${box.area}` : ''}
                     </p>
                   </div>
-                  <Badge tone={expiryTone(r.expiry_status)}>{r.expiry_status}</Badge>
+                  <Badge tone={urgent > 0 ? 'bad' : 'warn'}>
+                    {items.length} item{items.length === 1 ? '' : 's'}
+                  </Badge>
                 </div>
-                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
-                  <MiniFact label="System expiry" value={formatDate(r.expiry_date)} />
-                  <MiniFact label="Last verified" value={formatDate(r.last_verified_date)} />
-                  <MiniFact label="Recommended action" value={expiryAction(r.expiry_status)} strong />
+                <div className="grid gap-2 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {items.map((r) => (
+                    <div key={r.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">{r.item_name}</span>
+                        <Badge tone={expiryTone(r.expiry_status)}>{r.expiry_status}</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">Exp {formatDate(r.expiry_date)}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
             );
@@ -555,27 +563,33 @@ function IssuesReport({
         <div className="space-y-2">
           <SectionTitle
             title="Issues found during inspection"
-            subtitle="Observed problems from submitted inspections, grouped as clear actions."
+            subtitle="Compact item names grouped by box. Use this as the practical issue list."
           />
-          {rows.map((r) => {
-            const box = r.box_id ? boxById.get(r.box_id) : undefined;
+          {groupInspectionIssuesByBox(rows).map(([boxId, items]) => {
+            const box = boxById.get(boxId);
             return (
-              <div key={r.id} className="card p-4 transition duration-200 hover:border-slate-300 hover:shadow">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div key={boxId} className="card overflow-hidden">
+                <div className="flex flex-col gap-2 border-b border-slate-100 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-xs font-semibold text-slate-500">
-                      {boxLabel(box, r.box_id ?? undefined)}
+                    <h3 className="text-base font-bold">{boxLabel(box, boxId)}</h3>
+                    <p className="text-sm text-slate-600">
+                      {box?.box_name ?? 'Unknown box'}{box?.area ? ` - ${box.area}` : ''}
                     </p>
-                    <h3 className="text-base font-bold">{r.item_name}</h3>
-                    <p className="text-sm text-slate-600">{issueActionText(r)}</p>
                   </div>
-                  {r.item_status && <ItemStatusBadge status={r.item_status} />}
+                  <Badge tone={items.some((r) => r.is_expired || r.item_status === 'Missing') ? 'bad' : 'warn'}>
+                    {items.length} issue{items.length === 1 ? '' : 's'}
+                  </Badge>
                 </div>
-                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-4">
-                  <MiniFact label="Observed" value={observedText(r)} />
-                  <MiniFact label="System expiry" value={formatDate(r.system_expiry_date ?? r.expiry_date)} />
-                  <MiniFact label="Top-up" value={r.topup_required ? 'Required' : 'Not required'} />
-                  <MiniFact label="Remarks" value={r.remarks || '-'} />
+                <div className="grid gap-2 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {items.map((r) => (
+                    <div key={r.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">{r.item_name}</span>
+                        {r.item_status && <ItemStatusBadge status={r.item_status} />}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{issueActionText(r)}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
             );
@@ -598,34 +612,43 @@ function TopupsReport({
   onChanged: () => void;
 }) {
   const rows = data.topup_requests;
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const sortedRows = useMemo(() => [...rows].sort(compareTopups), [rows]);
   const activeRows = sortedRows.filter((r) => r.status === 'Open' || r.status === 'In Progress');
   const completedRows = sortedRows.filter((r) => r.status === 'Completed');
   const groups = useMemo(() => groupTopupsByBox(sortedRows), [sortedRows]);
 
-  async function setStatus(id: string, status: ReportTopup['status']) {
-    setBusyId(id);
+  async function setStatus(ids: string[], status: ReportTopup['status'], remarks?: string) {
+    if (ids.length === 0) {
+      setActionError('Select at least one item first.');
+      return;
+    }
+    setBusyKey(`${status}:${ids.join(',')}`);
     setActionError(null);
     try {
       const sb = getSupabaseBrowserClient();
       const { data: u } = await sb.auth.getUser();
       const done = status === 'Completed';
-      const { error } = await sb
-        .from('topup_requests')
-        .update({
-          status,
-          completed_by: done ? u.user?.id ?? null : null,
-          completed_at: done ? new Date().toISOString() : null,
-        })
-        .eq('id', id);
+      const patch: Record<string, unknown> = {
+        status,
+        completed_by: done ? u.user?.id ?? null : null,
+        completed_at: done ? new Date().toISOString() : null,
+      };
+      if (remarks) patch.remarks = remarks;
+      const { error } = await sb.from('topup_requests').update(patch).in('id', ids);
       if (error) throw new Error(error.message);
+      setSelected((prev) => {
+        const next = { ...prev };
+        for (const id of ids) delete next[id];
+        return next;
+      });
       onChanged();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Could not update.');
     } finally {
-      setBusyId(null);
+      setBusyKey(null);
     }
   }
 
@@ -665,13 +688,19 @@ function TopupsReport({
         <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{actionError}</p>
       )}
       <SectionTitle
-        title="Restock route"
-        subtitle="Work from top to bottom. High priority and open items appear first."
+        title="Issue stock by box"
+        subtitle="Tick what you issue now. Leave unchecked items open when stock is still waiting."
       />
       <div className="space-y-3">
         {groups.map(([boxId, items]) => {
           const box = boxById.get(boxId);
           const activeInBox = items.filter((i) => i.status === 'Open' || i.status === 'In Progress');
+          const selectedIds = activeInBox.filter((i) => selected[i.id]).map((i) => i.id);
+          const allOpenSelected = activeInBox.length > 0 && selectedIds.length === activeInBox.length;
+          const issueSelectedBusy = busyKey === `Completed:${selectedIds.join(',')}`;
+          const waitingSelectedBusy = busyKey === `In Progress:${selectedIds.join(',')}`;
+          const issueAllIds = activeInBox.map((i) => i.id);
+          const issueAllBusy = busyKey === `Completed:${issueAllIds.join(',')}`;
           return (
             <div key={boxId} className="card overflow-hidden">
               <div className="flex flex-col gap-2 border-b border-slate-100 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -683,45 +712,68 @@ function TopupsReport({
                 </div>
                 <Badge tone={activeInBox.length > 0 ? 'warn' : 'ok'}>{activeInBox.length} open</Badge>
               </div>
-              <div className="divide-y divide-slate-100">
+              {isAdmin && activeInBox.length > 0 && (
+                <div className="flex flex-wrap gap-2 border-b border-slate-100 p-3">
+                  <button
+                    type="button"
+                    className="btn btn-md btn-secondary"
+                    onClick={() => toggleSelectedIds(activeInBox.map((i) => i.id), !allOpenSelected, setSelected)}
+                  >
+                    {allOpenSelected ? 'Clear ticks' : 'Tick all open'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-md btn-secondary"
+                    disabled={selectedIds.length === 0 || Boolean(busyKey)}
+                    onClick={() => setStatus(selectedIds, 'In Progress', 'Waiting stock')}
+                  >
+                    {waitingSelectedBusy ? <Spinner className="h-4 w-4" /> : 'Mark waiting stock'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-md bg-emerald-600 text-white hover:bg-emerald-700"
+                    disabled={selectedIds.length === 0 || Boolean(busyKey)}
+                    onClick={() => setStatus(selectedIds, 'Completed')}
+                  >
+                    {issueSelectedBusy ? <Spinner className="h-4 w-4" /> : `Issue selected (${selectedIds.length})`}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-md btn-primary"
+                    disabled={issueAllIds.length === 0 || Boolean(busyKey)}
+                    onClick={() => setStatus(issueAllIds, 'Completed')}
+                  >
+                    {issueAllBusy ? <Spinner className="h-4 w-4" /> : 'Issue all open'}
+                  </button>
+                </div>
+              )}
+              <div className="grid gap-2 p-4 sm:grid-cols-2 lg:grid-cols-3">
                 {items.map((r) => {
                   const open = r.status === 'Open' || r.status === 'In Progress';
                   return (
-                    <div key={r.id} className="p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h4 className="font-semibold">{r.item_name}</h4>
-                            {r.priority && <PriorityBadge priority={r.priority} />}
-                            <Badge tone={topupStatusTone(r.status)}>{r.status}</Badge>
-                          </div>
-                          {r.reason && <p className="mt-1 text-sm text-slate-600">{r.reason}</p>}
-                          <p className="mt-1 text-xs text-slate-500">Requested {formatDateTime(r.requested_at)}</p>
-                        </div>
-                        {isAdmin && open && (
-                          <div className="flex shrink-0 gap-2">
-                            {r.status === 'Open' && (
-                              <button
-                                type="button"
-                                disabled={busyId === r.id}
-                                onClick={() => setStatus(r.id, 'In Progress')}
-                                className="btn btn-md btn-secondary"
-                              >
-                                Start
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              disabled={busyId === r.id}
-                              onClick={() => setStatus(r.id, 'Completed')}
-                              className="btn btn-md bg-emerald-600 text-white hover:bg-emerald-700"
-                            >
-                              {busyId === r.id ? <Spinner className="h-4 w-4" /> : 'Mark complete'}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <label
+                      key={r.id}
+                      className={`flex min-h-12 items-center gap-3 rounded-xl border px-3 py-2 ${
+                        open ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 text-slate-500'
+                      }`}
+                    >
+                      {isAdmin && (
+                        <input
+                          type="checkbox"
+                          className="h-5 w-5 accent-brand"
+                          disabled={!open}
+                          checked={Boolean(selected[r.id])}
+                          onChange={(e) => toggleSelectedIds([r.id], e.target.checked, setSelected)}
+                        />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-semibold">{r.item_name}</span>
+                        <span className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                          {r.priority && <PriorityBadge priority={r.priority} />}
+                          <Badge tone={topupStatusTone(r.status)}>{r.status}</Badge>
+                        </span>
+                      </span>
+                    </label>
                   );
                 })}
               </div>
@@ -935,6 +987,42 @@ function groupTopupsByBox(rows: ReportTopup[]) {
   return [...groups.entries()];
 }
 
+function groupExpiryByBox(rows: ReportsResponse['expiry_items']) {
+  const groups = new Map<string, ReportsResponse['expiry_items']>();
+  for (const row of rows) {
+    const list = groups.get(row.box_id) ?? [];
+    list.push(row);
+    groups.set(row.box_id, list);
+  }
+  return [...groups.entries()];
+}
+
+function groupInspectionIssuesByBox(rows: ReportsResponse['inspection_items']) {
+  const groups = new Map<string, ReportsResponse['inspection_items']>();
+  for (const row of rows) {
+    const key = row.box_id ?? row.inspection_id;
+    const list = groups.get(key) ?? [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  return [...groups.entries()];
+}
+
+function toggleSelectedIds(
+  ids: string[],
+  checked: boolean,
+  setSelected: Dispatch<SetStateAction<Record<string, boolean>>>,
+) {
+  setSelected((prev) => {
+    const next = { ...prev };
+    for (const id of ids) {
+      if (checked) next[id] = true;
+      else delete next[id];
+    }
+    return next;
+  });
+}
+
 function computeUsageStats(rows: ReportsResponse['usage_logs']) {
   const itemCounts = new Map<string, number>();
   const boxIds = new Set<string>();
@@ -961,7 +1049,7 @@ function computeUsageStats(rows: ReportsResponse['usage_logs']) {
 
 /* -------------------------------------------------------------------- Bits */
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
       <span className="label">{label}</span>
@@ -974,7 +1062,7 @@ function Empty({ label }: { label: string }) {
   return <div className="card p-8 text-center text-slate-500">{label}</div>;
 }
 
-function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
+function Table({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
   return (
     <div className="hidden overflow-x-auto md:block">
       <table className="w-full border-collapse text-sm">
