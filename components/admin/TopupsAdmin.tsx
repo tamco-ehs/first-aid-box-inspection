@@ -9,6 +9,12 @@ import { Notice, Section, useAsync, type AdminBox, type TopupRow } from './share
 
 const STATUSES = ['Open', 'In Progress', 'Completed', 'Rejected'] as const;
 
+type TopupPhotoRow = {
+  box_id: string;
+  item_name: string;
+  effective_item_photo_url: string | null;
+};
+
 export function TopupsAdmin() {
   const sb = getSupabaseBrowserClient();
   const [filter, setFilter] = useState<string>('Open');
@@ -17,15 +23,26 @@ export function TopupsAdmin() {
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
   const { data, loading, error, reload } = useAsync<{ topups: TopupRow[]; boxes: AdminBox[] }>(async () => {
-    const [topups, boxes] = await Promise.all([
+    const [topups, boxes, itemPhotos] = await Promise.all([
       sb
         .from('topup_requests')
         .select('id, box_id, item_name, reason, priority, status, requested_at, remarks')
         .order('requested_at', { ascending: false }),
       sb.from('boxes').select('id, box_code, box_name, location_description, area, template_id, inspection_frequency_days, is_active'),
+      sb.from('box_items_effective').select('box_id, item_name, effective_item_photo_url').eq('is_active', true),
     ]);
+    const photoByItem = new Map(
+      ((itemPhotos.data ?? []) as unknown as TopupPhotoRow[]).map((row) => [
+        topupPhotoKey(row.box_id, row.item_name),
+        row.effective_item_photo_url,
+      ]),
+    );
+    const topupRows = ((topups.data ?? []) as unknown as TopupRow[]).map((row) => ({
+      ...row,
+      item_photo_url: photoByItem.get(topupPhotoKey(row.box_id, row.item_name)) ?? null,
+    }));
     return {
-      topups: (topups.data ?? []) as unknown as TopupRow[],
+      topups: topupRows,
       boxes: (boxes.data ?? []) as unknown as AdminBox[],
     };
   });
@@ -181,6 +198,7 @@ export function TopupsAdmin() {
                         checked={Boolean(selected[t.id])}
                         onChange={(e) => toggleIds([t.id], e.target.checked, setSelected)}
                       />
+                      <TopupThumb url={t.item_photo_url} name={t.item_name} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-semibold">{t.item_name}</span>
                         <span className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
@@ -235,6 +253,38 @@ function topupStatusTone(status: TopupRow['status']) {
   if (status === 'Completed') return 'ok';
   if (status === 'Open') return 'warn';
   return 'neutral';
+}
+
+function TopupThumb({ url, name }: { url: string | null; name: string }) {
+  if (!url) {
+    return (
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-[10px] font-semibold text-slate-400">
+        {initials(name)}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt=""
+      loading="lazy"
+      className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 bg-white object-cover"
+    />
+  );
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
+function topupPhotoKey(boxId: string, itemName: string) {
+  return `${boxId}:${itemName.trim().toLowerCase()}`;
 }
 
 function toggleIds(

@@ -68,6 +68,7 @@ export interface TopupRow {
   id: string;
   box_id: string;
   item_name: string;
+  item_photo_url: string | null;
   reason: string | null;
   priority: 'Low' | 'Medium' | 'High' | null;
   status: 'Open' | 'In Progress' | 'Completed' | 'Rejected';

@@ -777,6 +777,7 @@ function TopupsReport({
                           onChange={(e) => toggleSelectedIds([r.id], e.target.checked, setSelected)}
                         />
                       )}
+                      <TopupThumb url={r.item_photo_url} name={r.item_name} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-semibold">{r.item_name}</span>
                         <span className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
@@ -974,6 +975,34 @@ function topupStatusTone(status: ReportTopup['status']): ReportTone {
   if (status === 'Rejected') return 'neutral';
   if (status === 'Open') return 'warn';
   return 'neutral';
+}
+
+function TopupThumb({ url, name }: { url: string | null; name: string }) {
+  if (!url) {
+    return (
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-[10px] font-semibold text-slate-400">
+        {initials(name)}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt=""
+      loading="lazy"
+      className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 bg-white object-cover"
+    />
+  );
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('');
 }
 
 const priorityOrder: Record<string, number> = { High: 0, Medium: 1, Low: 2 };

@@ -266,6 +266,10 @@ export async function GET(req: Request): Promise<Response> {
     if (f.box_id) tq = tq.eq('box_id', f.box_id);
     if (areaBoxIds) tq = tq.in('box_id', areaBoxIds);
     const { data: topups } = await tq;
+    const topupsWithPhotos = await attachTopupPhotos(
+      admin,
+      (topups ?? []) as Record<string, unknown>[],
+    );
 
     // --- current expiry reminders from per-box inventory ---
     let eq = admin
@@ -300,8 +304,36 @@ export async function GET(req: Request): Promise<Response> {
       inspections: inspections ?? [],
       inspection_items,
       expiry_items: expiryItems ?? [],
-      topup_requests: topups ?? [],
+      topup_requests: topupsWithPhotos,
       usage_logs: usage ?? [],
     });
   });
+}
+
+async function attachTopupPhotos(admin: Admin, rows: Record<string, unknown>[]) {
+  const boxIds = [...new Set(rows.map((row) => String(row.box_id ?? '')).filter(Boolean))];
+  if (boxIds.length === 0) return rows.map((row) => ({ ...row, item_photo_url: null }));
+
+  const { data, error } = await admin
+    .from('box_items_effective')
+    .select('box_id, item_name, effective_item_photo_url')
+    .in('box_id', boxIds)
+    .eq('is_active', true);
+  if (error) throw new Error(error.message);
+
+  const photos = new Map(
+    ((data ?? []) as { box_id: string; item_name: string; effective_item_photo_url: string | null }[]).map((row) => [
+      topupPhotoKey(row.box_id, row.item_name),
+      row.effective_item_photo_url,
+    ]),
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    item_photo_url: photos.get(topupPhotoKey(String(row.box_id ?? ''), String(row.item_name ?? ''))) ?? null,
+  }));
+}
+
+function topupPhotoKey(boxId: string, itemName: string) {
+  return `${boxId}:${itemName.trim().toLowerCase()}`;
 }
