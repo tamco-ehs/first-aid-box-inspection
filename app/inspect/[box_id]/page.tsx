@@ -150,7 +150,9 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   }
 
   function getBaseValidationError(item: TemplateItem, value: DraftObservation): string | null {
-    if (!hasObservation(item, value)) return `Check ${item.item_name} before continuing.`;
+    if (!hasObservation(item, value)) {
+      return 'Please select Still OK & Next or Issue / Change before continuing.';
+    }
     return validateObservation(toSpec(item), value);
   }
 
@@ -176,15 +178,25 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
     const evaluated = evaluateItem(toSpec(item), value, now);
     const final = evaluated.final_item_status;
     const issue = final === 'issue_found' || final === 'replacement_required' || final === 'topup_required';
-    const status: FlowStatus = issue ? 'Issue found' : final === 'ok' ? 'Completed' : 'Pending';
-    const detail = final === 'incomplete' ? 'Needs expiry check' : issue ? evaluated.item_status : null;
+    const completed = final === 'ok' || final === 'ok_quantity_updated';
+    const status: FlowStatus = issue ? 'Issue found' : completed ? 'Completed' : 'Pending';
+    const detail =
+      final === 'incomplete'
+        ? 'Needs expiry check'
+        : final === 'expiry_baseline_missing'
+          ? 'Record expiry date'
+          : final === 'ok_quantity_updated'
+            ? 'Quantity updated'
+            : issue
+              ? evaluated.item_status
+              : null;
 
     return {
       status,
       final,
       label: status,
       detail,
-      tone: issue ? 'warn' : final === 'ok' ? 'ok' : 'neutral',
+      tone: issue ? 'warn' : completed ? 'ok' : 'neutral',
       topupRequired: evaluated.topup_required,
       expired: evaluated.is_expired,
       expiringSoon: evaluated.expires_soon,
@@ -370,9 +382,14 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const noExpiryDateCount = itemReviews.filter((r) => r.noExpiryDateRecorded).length;
   const expiryMismatchCount = itemReviews.filter((r) => r.expiryLabelMismatch).length;
   const missingCount = itemReviews.filter((r) => r.missing).length;
+  const okCount = itemReviews.filter((r) => r.final === 'ok').length;
+  const okQtyUpdatedCount = itemReviews.filter((r) => r.final === 'ok_quantity_updated').length;
+  const replacementCount = itemReviews.filter((r) => r.final === 'replacement_required').length;
+  const labelIssueCount = itemReviews.filter((r) => r.expiryLabelMismatch || r.noExpiryDateRecorded).length;
   const remarksOrIssueCount = tpl.items.filter((it, i) => itemReviews[i]!.status === 'Issue found' || obs[it.box_item_id]?.remarks?.trim()).length;
   const progressPercent = Math.round((checkedCount / Math.max(1, tpl.items.length)) * 100);
   const currentItem = tpl.items[currentIndex] ?? tpl.items[0]!;
+  const currentChecked = hasObservation(currentItem, obs[currentItem.box_item_id] ?? {});
   const shortLocation = tpl.box.area || tpl.box.box_name;
   const guidanceNote =
     tpl.template?.guideline_reference ||
@@ -450,10 +467,12 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
             <h1 className="text-xl font-bold">Inspection summary</h1>
             <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
               <SummaryTile label="Total items" value={tpl.items.length} />
-              <SummaryTile label="Completed" value={completedCount} />
-              <SummaryTile label="Top-up" value={topupCount} tone="warn" />
+              <SummaryTile label="OK" value={okCount} />
+              <SummaryTile label="OK · qty updated" value={okQtyUpdatedCount} />
+              <SummaryTile label="Top-up required" value={topupCount} tone="warn" />
+              <SummaryTile label="Replacement" value={replacementCount} tone="bad" />
               <SummaryTile label="Expired" value={expiredCount} tone="bad" />
-              <SummaryTile label="Missing" value={missingCount} tone="bad" />
+              <SummaryTile label="Label issue" value={labelIssueCount} tone="warn" />
               <SummaryTile label="Remarks/issues" value={remarksOrIssueCount} tone="warn" />
             </div>
             {(expiredCount > 0 || expiringSoonCount > 0 || expiryMismatchCount > 0 || noExpiryDateCount > 0) && (
@@ -535,39 +554,27 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
         {draftBanner}
         {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
 
-        <section className="card p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+        <section className="card flex items-center gap-3 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-2">
               <p className="text-sm font-semibold">
                 Item {currentIndex + 1} of {tpl.items.length}
               </p>
-              <p className="text-xs text-slate-500">
-                {checkedCount} checked - {pendingCount} pending
+              <p className="shrink-0 text-xs text-slate-500">
+                {checkedCount} checked, {pendingCount} pending
               </p>
             </div>
-            <button type="button" onClick={() => setActiveSheet('items')} className="btn btn-md btn-secondary">
-              View All Items
-            </button>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${progressPercent}%` }} />
+            </div>
           </div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${progressPercent}%` }} />
-          </div>
-          <div className="mt-3 flex gap-1 overflow-hidden" aria-hidden>
-            {itemReviews.map((review, i) => (
-              <span
-                key={tpl.items[i]!.box_item_id}
-                className={`h-2 flex-1 rounded-full ${
-                  i === currentIndex
-                    ? 'bg-brand'
-                    : review.status === 'Issue found'
-                        ? 'bg-amber-400'
-                        : review.status === 'Completed'
-                          ? 'bg-emerald-400'
-                          : 'bg-slate-200'
-                }`}
-              />
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveSheet('items')}
+            className="btn btn-ghost min-h-9 shrink-0 px-2 text-xs text-slate-600"
+          >
+            All items
+          </button>
         </section>
 
         <div
@@ -585,13 +592,30 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
       </main>
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
-        <div className="mx-auto grid max-w-md grid-cols-2 gap-3">
-          <button type="button" onClick={() => goToItem(currentIndex - 1)} disabled={currentIndex === 0} className="btn btn-lg btn-secondary">
-            Previous
-          </button>
-          <button type="button" onClick={nextItem} className="btn btn-lg btn-primary">
-            {currentIndex >= tpl.items.length - 1 ? 'Review' : 'Next item'}
-          </button>
+        <div className="mx-auto max-w-md">
+          {!currentChecked && (
+            <p className="mb-1.5 text-center text-xs text-slate-500">
+              Check item first — tap Still OK &amp; Next or Issue / Change
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => goToItem(currentIndex - 1)}
+              disabled={currentIndex === 0}
+              className="btn btn-lg btn-secondary"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={nextItem}
+              disabled={!currentChecked}
+              className="btn btn-lg btn-primary"
+            >
+              {currentIndex >= tpl.items.length - 1 ? 'Review' : 'Next item'}
+            </button>
+          </div>
         </div>
       </div>
 

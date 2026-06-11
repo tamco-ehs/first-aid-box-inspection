@@ -57,6 +57,7 @@ export function ChecklistCard({
     return evaluateItem(toSpec(item), value, now);
   }, [item, value, now]);
 
+  const previousQty = item.current_quantity;
   const hasSavedDate = Boolean(item.current_expiry_date);
   const savedExpired = item.expiry_status === 'Expired';
   const savedNeedsAttention =
@@ -64,15 +65,28 @@ export function ChecklistCard({
     (!hasSavedDate ||
       item.expiry_status === 'Expiry label mismatch' ||
       item.expiry_status === 'No expiry date recorded');
-  // Eligible for the one-tap "Still OK" shortcut: condition can be confirmed and
-  // (when tracked) there is a saved expiry date that is not expired/flagged.
-  const quickEligible = !item.has_expiry || (hasSavedDate && !savedExpired && !savedNeedsAttention);
+  // "Still OK & Next" is only offered when nothing needs to change: the saved
+  // expiry date is present and not expired/flagged, AND (for counted items) the
+  // last saved quantity already meets the required minimum.
+  const quantityQuickOk =
+    item.measurement_type !== 'quantity' ||
+    (previousQty != null && (item.required_quantity == null || previousQty >= item.required_quantity));
+  const expiryQuickOk = !item.has_expiry || (hasSavedDate && !savedExpired && !savedNeedsAttention);
+  const quickEligible = quantityQuickOk && expiryQuickOk;
 
   const expiryChoice: ExpiryValidationStatus | null =
     value.expiry_validation_status ?? (value.expiry_quick_option === 'no_label' ? 'no_label' : null);
 
   const hasInput = hasObservation(item, value) || expiryChoice != null || Boolean(value.remarks?.trim());
   const [expanded, setExpanded] = useState(!quickEligible || hasInput);
+  // Quantity sub-mode (only for counted items with > 1 required and a previous qty).
+  const [qtyMode, setQtyMode] = useState<'same' | 'changed' | null>(
+    value.observed_quantity == null
+      ? null
+      : previousQty != null && value.observed_quantity === previousQty
+        ? 'same'
+        : 'changed',
+  );
 
   const requiredLabel =
     item.measurement_type === 'quantity'
@@ -95,7 +109,7 @@ export function ChecklistCard({
   function stillOk() {
     const patch: Partial<DraftObservation> = { expiry_quick_option: null };
     if (item.measurement_type === 'quantity')
-      patch.observed_quantity = item.required_quantity ?? item.current_quantity ?? 1;
+      patch.observed_quantity = item.current_quantity ?? item.required_quantity ?? 1;
     if (item.measurement_type === 'volume_level') patch.observed_volume_level = 'Full';
     if (item.measurement_type === 'present_absent') patch.observed_present_status = 'Present';
     if (item.has_expiry) patch.expiry_validation_status = 'matches_label';
@@ -173,11 +187,15 @@ export function ChecklistCard({
             </div>
           )}
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={stillOk} className="btn btn-md btn-primary">
-              Still OK
+            <button
+              type="button"
+              onClick={stillOk}
+              className="btn btn-md bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              Still OK &amp; Next
             </button>
             <button type="button" onClick={() => setExpanded(true)} className="btn btn-md btn-secondary">
-              Update / Issue found
+              Issue / Change
             </button>
           </div>
         </div>
@@ -185,22 +203,88 @@ export function ChecklistCard({
         <>
           {/* Condition */}
           <div className="mt-3">
-            {item.measurement_type === 'quantity' && (
-              <label className="block">
-                <span className="label">Current quantity</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  className="input"
-                  placeholder={`e.g. ${item.required_quantity ?? 0}`}
-                  value={value.observed_quantity ?? ''}
-                  onChange={(e) =>
-                    set({ observed_quantity: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) })
-                  }
-                />
-              </label>
-            )}
+            {item.measurement_type === 'quantity' &&
+              (item.required_quantity === 1 ? (
+                // Single-unit item: present-style Available / Missing, no number pad.
+                <div className="flex gap-2">
+                  {([
+                    { label: 'Available', qty: 1, tone: 'ok' as const },
+                    { label: 'Missing', qty: 0, tone: 'bad' as const },
+                  ]).map((opt) => {
+                    const selected = value.observed_quantity === opt.qty;
+                    return (
+                      <button
+                        type="button"
+                        key={opt.label}
+                        onClick={() => {
+                          set({ observed_quantity: opt.qty });
+                          onComplete?.();
+                        }}
+                        className={`choice ${selected ? toneClass.on[opt.tone] : ''}`}
+                        aria-pressed={selected}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-500">
+                    Required: {item.required_quantity ?? '-'} {item.unit ?? ''}
+                    {previousQty != null && (
+                      <>
+                        {' · '}Previous: {previousQty} {item.unit ?? ''}
+                      </>
+                    )}
+                  </p>
+                  {previousQty != null && (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setQtyMode('same');
+                          set({ observed_quantity: previousQty });
+                        }}
+                        className={`choice ${
+                          qtyMode === 'same'
+                            ? toneClass.on[previousQty >= (item.required_quantity ?? 0) ? 'ok' : 'warn']
+                            : ''
+                        }`}
+                        aria-pressed={qtyMode === 'same'}
+                      >
+                        Same as previous ({previousQty})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQtyMode('changed')}
+                        className={`choice ${qtyMode === 'changed' ? toneClass.on.warn : ''}`}
+                        aria-pressed={qtyMode === 'changed'}
+                      >
+                        Quantity changed
+                      </button>
+                    </div>
+                  )}
+                  {(qtyMode === 'changed' || previousQty == null) && (
+                    <label className="block">
+                      <span className="label">Current quantity</span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        className="input"
+                        placeholder={`e.g. ${item.required_quantity ?? 0}`}
+                        value={value.observed_quantity ?? ''}
+                        onChange={(e) =>
+                          set({
+                            observed_quantity: e.target.value === '' ? null : Math.max(0, Number(e.target.value)),
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              ))}
 
             {item.measurement_type === 'volume_level' && (
               <div className="flex flex-wrap gap-2">
@@ -259,19 +343,19 @@ export function ChecklistCard({
                       : 'No expiry date saved yet.'}
                   </p>
                 </div>
-                {item.expiry_status && (
-                  <Badge
-                    tone={
-                      item.expiry_status === 'Expired' || item.expiry_status === 'No expiry date recorded'
+                <Badge
+                  tone={
+                    !hasSavedDate
+                      ? 'warn'
+                      : item.expiry_status === 'Expired'
                         ? 'bad'
                         : item.expiry_status === 'Valid'
                           ? 'ok'
                           : 'warn'
-                    }
-                  >
-                    {item.expiry_status}
-                  </Badge>
-                )}
+                  }
+                >
+                  {!hasSavedDate ? 'Baseline missing' : (item.expiry_status ?? '-')}
+                </Badge>
               </div>
 
               {savedExpired && (

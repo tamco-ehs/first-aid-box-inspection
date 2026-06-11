@@ -37,18 +37,20 @@ test('quantity at 100% is OK', () => {
   assert.equal(r.is_below_half, false);
 });
 
-test('quantity exactly at 50% is Low Stock + below half + topup', () => {
+test('quantity at half of required is Low Stock + below half + topup (High)', () => {
   const r = evalOne(spec({ required_quantity: 30 }), { observed_quantity: 15 });
   assert.equal(r.item_status, 'Low Stock');
   assert.equal(r.is_below_half, true);
   assert.equal(r.topup_required, true);
-  assert.equal(r.priority, 'Medium');
+  assert.equal(r.priority, 'High'); // below the required minimum -> High
 });
 
-test('quantity just above 50% is OK', () => {
+test('quantity below required (any shortfall) is Top-up required, not OK', () => {
   const r = evalOne(spec({ required_quantity: 30 }), { observed_quantity: 16 });
-  assert.equal(r.item_status, 'OK');
-  assert.equal(r.topup_required, false);
+  assert.equal(r.item_status, 'Low Stock');
+  assert.equal(r.topup_required, true);
+  assert.equal(r.final_item_status, 'topup_required');
+  assert.equal(r.quantity_status, 'below_required');
 });
 
 test('quantity 0 is Missing + topup', () => {
@@ -58,13 +60,16 @@ test('quantity 0 is Missing + topup', () => {
   assert.equal(r.priority, 'High');
 });
 
-test('fixed_quantity threshold can trigger low stock above 50%', () => {
-  const r = evalOne(
-    spec({ required_quantity: 30, restock_threshold_type: 'fixed_quantity', restock_threshold_quantity: 20 }),
-    { observed_quantity: 18 },
-  );
-  assert.equal(r.item_status, 'Low Stock');
-  assert.equal(r.topup_required, true);
+test('quantity req 9 / prev 9 / current 8 -> below required, top up 1, High', () => {
+  const r = evalOne(spec({ required_quantity: 9, previous_quantity: 9 }), {
+    observed_quantity: 8,
+    remarks: 'Used one.',
+  });
+  assert.equal(r.quantity_status, 'below_required');
+  assert.equal(r.final_item_status, 'topup_required');
+  assert.equal(r.topup_quantity, 1);
+  assert.equal(r.action_type, 'topup_required');
+  assert.equal(r.priority, 'High');
 });
 
 // --- Volume levels: Half / Below Half / Empty are flagged --------------------
@@ -206,15 +211,15 @@ test('validateObservation requires the right field per measurement type', () => 
 
 test('validateObservation requires expiry validation when has_expiry', () => {
   assert.match(
-    validateObservation(spec({ has_expiry: true }), { observed_quantity: 1 }) ?? '',
+    validateObservation(spec({ has_expiry: true }), { observed_quantity: 30 }) ?? '',
     /expiry check is required/,
   );
   assert.match(
-    validateObservation(spec({ has_expiry: true }), { observed_quantity: 1, expiry_date: '2026-13-40' }) ?? '',
+    validateObservation(spec({ has_expiry: true }), { observed_quantity: 30, expiry_date: '2026-13-40' }) ?? '',
     /valid YYYY-MM-DD/,
   );
   assert.equal(
-    validateObservation(spec({ has_expiry: true }), { observed_quantity: 1, expiry_date: '2026-12-01' }),
+    validateObservation(spec({ has_expiry: true }), { observed_quantity: 30, expiry_date: '2026-12-01' }),
     null,
   );
 });
@@ -222,7 +227,7 @@ test('validateObservation requires expiry validation when has_expiry', () => {
 test('monthly expiry validation can use the stored box item date', () => {
   const s = spec({ has_expiry: true, current_expiry_date: '2026-12-01' });
   assert.equal(
-    validateObservation(s, { observed_quantity: 1, expiry_validation_status: 'matches_label' }),
+    validateObservation(s, { observed_quantity: 30, expiry_validation_status: 'matches_label' }),
     null,
   );
   const r = evalOne(s, { observed_quantity: 30, expiry_validation_status: 'matches_label' });
@@ -386,5 +391,48 @@ test('non-expiry acceptable item -> final ok', () => {
   assert.equal(
     evalOne(spec({ measurement_type: 'present_absent' }), { observed_present_status: 'Present' }).final_item_status,
     'ok',
+  );
+});
+
+// --- Phase 1: quantity status + action mapping ------------------------------
+test('quantity req 5 / prev 9 / current 8 -> OK quantity updated, no top-up', () => {
+  const r = evalOne(spec({ required_quantity: 5, previous_quantity: 9 }), { observed_quantity: 8 });
+  assert.equal(r.quantity_status, 'ok_quantity_updated');
+  assert.equal(r.final_item_status, 'ok_quantity_updated');
+  assert.equal(r.topup_required, false);
+  assert.equal(r.action_type, 'no_action');
+});
+
+test('quantity unchanged at/above required -> OK (unchanged)', () => {
+  const r = evalOne(spec({ required_quantity: 5, previous_quantity: 8 }), { observed_quantity: 8 });
+  assert.equal(r.quantity_status, 'unchanged_ok');
+  assert.equal(r.final_item_status, 'ok');
+});
+
+test('quantity 0 -> missing / replacement required', () => {
+  const r = evalOne(spec({ required_quantity: 9, previous_quantity: 9 }), { observed_quantity: 0 });
+  assert.equal(r.quantity_status, 'missing');
+  assert.equal(r.item_status, 'Missing');
+  assert.equal(r.action_type, 'replacement_required');
+});
+
+test('expiry-tracked item with no saved date and no choice -> baseline missing', () => {
+  const r = evalOne(spec({ has_expiry: true, current_expiry_date: null }), { observed_quantity: 30 });
+  assert.equal(r.final_item_status, 'expiry_baseline_missing');
+  assert.equal(r.action_type, 'expiry_baseline_missing');
+});
+
+test('quantity below required requires remarks; updated-but-acceptable does not', () => {
+  assert.match(
+    validateObservation(spec({ required_quantity: 9 }), { observed_quantity: 8 }) ?? '',
+    /remarks are required/,
+  );
+  assert.equal(
+    validateObservation(spec({ required_quantity: 9 }), { observed_quantity: 8, remarks: 'Used one.' }),
+    null,
+  );
+  assert.equal(
+    validateObservation(spec({ required_quantity: 5, previous_quantity: 9 }), { observed_quantity: 8 }),
+    null,
   );
 });

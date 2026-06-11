@@ -20,7 +20,7 @@ import { ApiError, badRequest, jsonOk, notFound, safe } from '@/lib/http';
 import { requireActive, requireBoxAccess, requireRole } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { PUBLIC_ENV, SERVER_ENV } from '@/lib/env';
-import { buildTopupEmail, sendEmail } from '@/lib/email';
+import { buildActionEmail, sendEmail } from '@/lib/email';
 import { INSPECTION_PHOTO_FOLDER, isAllowedCloudinaryUrl } from '@/lib/logic/cloudinary-url.ts';
 import {
   computeOverallStatus,
@@ -258,38 +258,35 @@ export async function POST(req: Request): Promise<Response> {
       if (topupRows.length > 0) {
         const { error: topupErr } = await admin.from('topup_requests').insert(topupRows);
         if (topupErr) throw topupErr;
+      }
 
-        const adminEmail = SERVER_ENV.adminNotificationEmail();
-        if (adminEmail) {
-          const mail = buildTopupEmail({
-            boxCode: boxRow.box_code,
-            boxName: boxRow.box_name,
-            location: boxRow.location_description,
-            inspectorName: ctx.profile.full_name,
-            overallStatus: overall,
-            boxId: body.box_id,
-            items: topupRows.map((r) => ({
-              itemName: r.item_name,
-              priority: r.priority,
-              reason: r.reason,
-              requiredQuantity: r.required_quantity,
-              observedQuantity: r.observed_quantity,
-              observedVolumeLevel: r.observed_volume_level,
-              expiryDate: r.expiry_date,
-            })),
-          });
-          const emailResult = await sendEmail({
-            to: [adminEmail],
-            subject: mail.subject,
-            html: mail.html,
-            text: mail.text,
-          });
-          if (!emailResult.ok) {
-            console.error('[inspections] top-up email failed:', emailResult.error);
-          }
-        } else {
-          console.warn('[inspections] top-up email skipped: ADMIN_NOTIFICATION_EMAIL is not set.');
+      // Admin action email - covers ALL action items, not only top-ups.
+      const actionLines = lines
+        .filter((l) => l.ev.action_type !== 'no_action')
+        .map((l) => ({ ev: l.ev, unit: l.unit }));
+      const adminEmail = SERVER_ENV.adminNotificationEmail();
+      if (adminEmail && actionLines.length > 0) {
+        const mail = buildActionEmail({
+          boxCode: boxRow.box_code,
+          boxName: boxRow.box_name,
+          location: boxRow.location_description,
+          inspectorName: ctx.profile.full_name,
+          overallStatus: overall,
+          submittedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+          boxId: body.box_id,
+          lines: actionLines,
+        });
+        const emailResult = await sendEmail({
+          to: [adminEmail],
+          subject: mail.subject,
+          html: mail.html,
+          text: mail.text,
+        });
+        if (!emailResult.ok) {
+          console.error('[inspections] action email failed:', emailResult.error);
         }
+      } else if (!adminEmail && actionLines.length > 0) {
+        console.warn('[inspections] action email skipped: ADMIN_NOTIFICATION_EMAIL is not set.');
       }
 
       // update each box item's last-known state and expiry verification metadata

@@ -80,10 +80,32 @@ export type ItemExpiryState =
 export type FinalItemStatus =
   | 'pending'
   | 'ok'
+  | 'ok_quantity_updated'
   | 'incomplete'
-  | 'issue_found'
+  | 'expiry_baseline_missing'
   | 'topup_required'
-  | 'replacement_required';
+  | 'replacement_required'
+  | 'issue_found';
+
+/** Quantity verdict for count-based items (drives top-up vs OK-updated). */
+export type QuantityStatus =
+  | 'not_required'
+  | 'unchanged_ok'
+  | 'ok_quantity_updated'
+  | 'below_required'
+  | 'missing'
+  | 'pending';
+
+/** The single action an item needs - shared by inspection, email and dashboard. */
+export type ActionType =
+  | 'no_action'
+  | 'topup_required'
+  | 'replacement_required'
+  | 'expiring_soon'
+  | 'expiry_verification_required'
+  | 'expiry_baseline_missing'
+  | 'admin_review_required'
+  | 'immediate_action';
 
 /** The expected setup of one item in a box (from box_items joined with template). */
 export interface BoxItemSpec {
@@ -91,6 +113,8 @@ export interface BoxItemSpec {
   item_name: string;
   measurement_type: MeasurementType;
   required_quantity: number | null;
+  /** Last saved box-level quantity (lets us tell "still OK" from "qty changed"). */
+  previous_quantity?: number | null;
   has_expiry: boolean;
   current_expiry_date?: string | null;
   expiry_warning_days: number | null;
@@ -127,10 +151,13 @@ export interface EvaluatedItem {
   expiry_label_mismatch: boolean;
   no_expiry_date_recorded: boolean;
   item_status: ItemStatus;
-  // Derived three-layer view (not persisted; drives the form UI):
+  // Derived three-layer view (not persisted; drives the form UI + email):
   condition_status: ConditionStatus;
   expiry_state: ItemExpiryState;
   expiry_verified: boolean;
+  quantity_status: QuantityStatus;
+  topup_quantity: number | null;
+  action_type: ActionType;
   final_item_status: FinalItemStatus;
   is_below_half: boolean;
   is_expired: boolean;

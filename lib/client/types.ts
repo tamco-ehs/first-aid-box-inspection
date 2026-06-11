@@ -2,6 +2,7 @@
 // with the route handlers by hand (no codegen).
 
 import type {
+  ActionType,
   DueStatus,
   ExpiryReminderStatus,
   ExpiryValidationStatus,
@@ -11,11 +12,13 @@ import type {
   OverallStatus,
   Priority,
   PresentStatus,
+  QuantityStatus,
   Role,
   VolumeLevel,
 } from '@/lib/logic/types.ts';
 
 export type {
+  ActionType,
   DueStatus,
   ExpiryReminderStatus,
   ExpiryValidationStatus,
@@ -25,6 +28,7 @@ export type {
   OverallStatus,
   Priority,
   PresentStatus,
+  QuantityStatus,
   Role,
   VolumeLevel,
 };

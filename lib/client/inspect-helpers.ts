@@ -12,6 +12,7 @@ export function toSpec(item: TemplateItem): BoxItemSpec {
     item_name: item.item_name,
     measurement_type: item.measurement_type,
     required_quantity: item.required_quantity,
+    previous_quantity: item.current_quantity,
     has_expiry: item.has_expiry,
     current_expiry_date: item.current_expiry_date,
     expiry_warning_days: item.expiry_warning_days,

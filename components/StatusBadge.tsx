@@ -46,7 +46,9 @@ export function ItemStatusBadge({ status }: { status: ItemStatus }) {
 const finalTone: Record<FinalItemStatus, Tone> = {
   pending: 'neutral',
   ok: 'ok',
+  ok_quantity_updated: 'ok',
   incomplete: 'warn',
+  expiry_baseline_missing: 'warn',
   issue_found: 'bad',
   topup_required: 'warn',
   replacement_required: 'bad',
@@ -54,7 +56,9 @@ const finalTone: Record<FinalItemStatus, Tone> = {
 const finalLabel: Record<FinalItemStatus, string> = {
   pending: 'Pending',
   ok: 'OK',
+  ok_quantity_updated: 'OK · qty updated',
   incomplete: 'Needs expiry check',
+  expiry_baseline_missing: 'Record expiry',
   issue_found: 'Issue found',
   topup_required: 'Top-up',
   replacement_required: 'Replace now',
