@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { DueStatus, ItemStatus, OverallStatus, Priority } from '@/lib/client/types.ts';
+import type { DueStatus, FinalItemStatus, ItemStatus, OverallStatus, Priority } from '@/lib/client/types.ts';
 
 type Tone = 'ok' | 'warn' | 'bad' | 'neutral';
 
@@ -39,6 +39,28 @@ const itemTone: Record<ItemStatus, Tone> = {
 };
 export function ItemStatusBadge({ status }: { status: ItemStatus }) {
   return <Badge tone={itemTone[status]}>{status}</Badge>;
+}
+
+// The badge-facing verdict shown on the inspection card (combines condition +
+// expiry). An expiry-tracked item stays "Needs expiry check" until verified.
+const finalTone: Record<FinalItemStatus, Tone> = {
+  pending: 'neutral',
+  ok: 'ok',
+  incomplete: 'warn',
+  issue_found: 'bad',
+  topup_required: 'warn',
+  replacement_required: 'bad',
+};
+const finalLabel: Record<FinalItemStatus, string> = {
+  pending: 'Pending',
+  ok: 'OK',
+  incomplete: 'Needs expiry check',
+  issue_found: 'Issue found',
+  topup_required: 'Top-up',
+  replacement_required: 'Replace now',
+};
+export function FinalItemStatusBadge({ status }: { status: FinalItemStatus }) {
+  return <Badge tone={finalTone[status]}>{finalLabel[status]}</Badge>;
 }
 
 const overallTone: Record<OverallStatus, Tone> = {

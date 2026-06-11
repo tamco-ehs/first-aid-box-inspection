@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { api, ApiClientError, type InspectionSubmitBody } from '@/lib/client/api.ts';
-import type { InspectionResult, InspectionTemplateResponse, Me, TemplateItem } from '@/lib/client/types.ts';
+import type {
+  FinalItemStatus,
+  InspectionResult,
+  InspectionTemplateResponse,
+  Me,
+  TemplateItem,
+} from '@/lib/client/types.ts';
 import { clearDraft, loadDraft, saveDraft, type DraftObservation } from '@/lib/client/draft.ts';
 import { hasObservation, toSpec } from '@/lib/client/inspect-helpers.ts';
 import { evaluateItem, validateObservation } from '@/lib/logic/inspection.ts';
@@ -32,6 +38,7 @@ type ValidationIssue = { message: string; itemIndex: number | null };
 
 interface ItemReview {
   status: FlowStatus;
+  final: FinalItemStatus;
   label: string;
   detail: string | null;
   tone: 'neutral' | 'ok' | 'warn';
@@ -148,10 +155,11 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   }
 
   function getItemReview(item: TemplateItem, value: DraftObservation): ItemReview {
-    const baseError = getBaseValidationError(item, value);
-    if (baseError) {
+    const hasRemarks = Boolean(value.remarks?.trim());
+    if (!hasObservation(item, value)) {
       return {
         status: 'Pending',
+        final: 'pending',
         label: 'Pending',
         detail: null,
         tone: 'neutral',
@@ -161,39 +169,36 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
         noExpiryDateRecorded: false,
         expiryLabelMismatch: false,
         missing: false,
-        hasRemarks: Boolean(value.remarks?.trim()),
+        hasRemarks,
       };
     }
 
     const evaluated = evaluateItem(toSpec(item), value, now);
-    const noExpiryLabel = value.expiry_validation_status === 'no_label' || value.expiry_quick_option === 'no_label';
-    const issue = noExpiryLabel || evaluated.topup_required || evaluated.item_status !== 'OK';
-    const detail = noExpiryLabel ? 'No expiry label' : issue ? evaluated.item_status : null;
+    const final = evaluated.final_item_status;
+    const issue = final === 'issue_found' || final === 'replacement_required' || final === 'topup_required';
+    const status: FlowStatus = issue ? 'Issue found' : final === 'ok' ? 'Completed' : 'Pending';
+    const detail = final === 'incomplete' ? 'Needs expiry check' : issue ? evaluated.item_status : null;
 
     return {
-      status: issue ? 'Issue found' : 'Completed',
-      label: issue ? 'Issue found' : 'Completed',
+      status,
+      final,
+      label: status,
       detail,
-      tone: issue ? 'warn' : 'ok',
-      topupRequired: issue,
-      expired: noExpiryLabel ? false : evaluated.is_expired,
+      tone: issue ? 'warn' : final === 'ok' ? 'ok' : 'neutral',
+      topupRequired: evaluated.topup_required,
+      expired: evaluated.is_expired,
       expiringSoon: evaluated.expires_soon,
       noExpiryDateRecorded: evaluated.no_expiry_date_recorded,
       expiryLabelMismatch: evaluated.expiry_label_mismatch,
       missing: evaluated.item_status === 'Missing',
-      hasRemarks: Boolean(value.remarks?.trim()),
+      hasRemarks,
     };
   }
 
   function getItemValidationError(item: TemplateItem, value: DraftObservation): string | null {
-    const baseError = getBaseValidationError(item, value);
-    if (baseError) return baseError;
-
-    const review = getItemReview(item, value);
-    if (review.status === 'Issue found' && !value.remarks?.trim()) {
-      return `Add remarks for ${item.item_name} because an issue was found.`;
-    }
-    return null;
+    // validateObservation (inside getBaseValidationError) is authoritative for
+    // required fields AND required remarks, so no extra check is needed here.
+    return getBaseValidationError(item, value);
   }
 
   function findItemValidationIssue(): ValidationIssue | null {
@@ -282,22 +287,20 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
     goToItem(currentIndex + 1);
   }
 
+  // Passive value edits (typing a quantity/date, remarks, or picking an expiry
+  // option that needs a follow-up date) update the draft but must NOT auto-
+  // advance - that made the date field jump straight to the next item. Advancing
+  // is requested explicitly via completeCurrentItem (a decisive "tap and move on").
   function setCurrentItem(next: DraftObservation): void {
     const item = tpl!.items[currentIndex]!;
-    const previous = obs[item.box_item_id] ?? {};
-    const changedInspectionValue =
-      previous.observed_quantity !== next.observed_quantity ||
-      previous.observed_volume_level !== next.observed_volume_level ||
-      previous.observed_present_status !== next.observed_present_status ||
-      previous.expiry_date !== next.expiry_date ||
-      previous.expiry_validation_status !== next.expiry_validation_status ||
-      previous.replacement_date !== next.replacement_date ||
-      previous.replacement_photo_url !== next.replacement_photo_url ||
-      previous.expiry_quick_option !== next.expiry_quick_option;
-
     setObs((p) => ({ ...p, [item.box_item_id]: next }));
-    setLastEditedItemId(changedInspectionValue ? item.box_item_id : null);
+    setLastEditedItemId(null);
     setSubmitError(null);
+  }
+
+  function completeCurrentItem(): void {
+    const item = tpl!.items[currentIndex]!;
+    setLastEditedItemId(item.box_item_id);
   }
 
   async function submit() {
@@ -571,7 +574,13 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
           key={currentItem.box_item_id}
           className={`inspection-step ${stepDirection === 'backward' ? 'inspection-step-backward' : 'inspection-step-forward'}`}
         >
-          <ChecklistCard item={currentItem} value={obs[currentItem.box_item_id] ?? {}} onChange={setCurrentItem} now={now} />
+          <ChecklistCard
+            item={currentItem}
+            value={obs[currentItem.box_item_id] ?? {}}
+            onChange={setCurrentItem}
+            onComplete={completeCurrentItem}
+            now={now}
+          />
         </div>
       </main>
 

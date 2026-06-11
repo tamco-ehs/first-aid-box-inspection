@@ -7,8 +7,11 @@
 
 import type {
   BoxItemSpec,
+  ConditionStatus,
   EvaluatedItem,
   ExpiryReminderStatus,
+  FinalItemStatus,
+  ItemExpiryState,
   ItemStatus,
   Observation,
   OverallStatus,
@@ -75,6 +78,33 @@ export function getEffectiveExpiryDate(spec: BoxItemSpec, obs: Observation): str
 }
 
 /**
+ * Whether free-text remarks are mandatory for this observation. Per spec:
+ * required for missing / damaged / empty stock, a missing-not-replaced item,
+ * no expiry label, an expired item, a real expiry-date correction, or a
+ * replacement. NOT required for a clean OK item, low stock, or a first-time
+ * baseline expiry record.
+ */
+export function remarksRequired(spec: BoxItemSpec, obs: Observation, now: Date): boolean {
+  if (obs.observed_present_status === 'Missing' || obs.observed_present_status === 'Damaged') return true;
+  if (obs.observed_volume_level === 'Empty') return true;
+  if (spec.measurement_type === 'quantity' && obs.observed_quantity != null && obs.observed_quantity <= 0) {
+    return true;
+  }
+  const status = obs.expiry_validation_status ?? null;
+  if (status === 'no_label' || status === 'missing_not_replaced' || status === 'replaced_now') return true;
+  // Correcting an EXISTING saved date needs a note; a first baseline record does not.
+  if (status === 'different_date' && spec.current_expiry_date != null) return true;
+  if (spec.has_expiry) {
+    const eff = getEffectiveExpiryDate(spec, obs);
+    if (eff) {
+      const d = daysUntil(eff, now);
+      if (d !== null && d < 0) return true; // resolves to an expired item
+    }
+  }
+  return false;
+}
+
+/**
  * Validate a single observation against its spec BEFORE scoring.
  * Returns a human-readable error string, or null when valid.
  * (The DB CHECK constraints are the final backstop; this gives clean 400s.)
@@ -100,45 +130,38 @@ export function validateObservation(spec: BoxItemSpec, obs: Observation): string
       }
       break;
   }
+
   if (spec.has_expiry) {
     const status = obs.expiry_validation_status ?? null;
     if (!status) {
+      // No explicit expiry choice. Legacy path: a raw expiry_date is still accepted.
       if (!obs.expiry_date) {
-        return `"${spec.item_name}": expiry validation is required.`;
+        return `"${spec.item_name}": an expiry check is required.`;
       }
       if (daysUntil(obs.expiry_date, new Date()) === null) {
         return `"${spec.item_name}": expiry date must be a valid YYYY-MM-DD date.`;
       }
-      return null;
-    }
-
-    if (status === 'matches_label' && !spec.current_expiry_date) {
-      return `"${spec.item_name}": no system expiry date is recorded. Choose Different date or Replaced now.`;
-    }
-
-    if (status === 'different_date' || status === 'replaced_now') {
-      if (!obs.expiry_date) return `"${spec.item_name}": new expiry date is required.`;
-      if (daysUntil(obs.expiry_date, new Date()) === null) {
-        return `"${spec.item_name}": expiry date must be a valid YYYY-MM-DD date.`;
+    } else {
+      if (status === 'matches_label' && !spec.current_expiry_date) {
+        return `"${spec.item_name}": no saved expiry date to match - choose Record expiry date or I replaced this item now.`;
+      }
+      if (status === 'different_date' || status === 'replaced_now') {
+        if (!obs.expiry_date) return `"${spec.item_name}": an expiry date is required.`;
+        if (daysUntil(obs.expiry_date, new Date()) === null) {
+          return `"${spec.item_name}": expiry date must be a valid YYYY-MM-DD date.`;
+        }
+      }
+      if (status === 'replaced_now') {
+        if (!obs.replacement_date) return `"${spec.item_name}": replacement date is required.`;
+        if (daysUntil(obs.replacement_date, new Date()) === null) {
+          return `"${spec.item_name}": replacement date must be a valid YYYY-MM-DD date.`;
+        }
       }
     }
+  }
 
-    if (status === 'replaced_now') {
-      if (!obs.replacement_date) return `"${spec.item_name}": replacement date is required.`;
-      if (daysUntil(obs.replacement_date, new Date()) === null) {
-        return `"${spec.item_name}": replacement date must be a valid YYYY-MM-DD date.`;
-      }
-    }
-
-    if (
-      (status === 'different_date' ||
-        status === 'no_label' ||
-        status === 'expired' ||
-        status === 'missing_not_replaced') &&
-      !obs.remarks?.trim()
-    ) {
-      return `"${spec.item_name}": remarks are required for this expiry issue.`;
-    }
+  if (remarksRequired(spec, obs, new Date()) && !obs.remarks?.trim()) {
+    return `"${spec.item_name}": remarks are required for this item.`;
   }
   return null;
 }
@@ -158,25 +181,35 @@ export function evaluateItem(spec: BoxItemSpec, obs: Observation, now: Date): Ev
   const observedVolume = obs.observed_volume_level ?? null;
   const observedPresent = obs.observed_present_status ?? null;
 
+  // Layer A: condition (what the physical stock looks like).
+  let condition_status: ConditionStatus = 'pending';
+
   switch (spec.measurement_type) {
     case 'quantity': {
       const required = spec.required_quantity ?? 0;
-      const q = observedQuantity ?? 0;
-      if (q <= 0) {
+      if (observedQuantity === null) {
+        condition_status = 'pending';
+      } else if (observedQuantity <= 0) {
         missing = true;
-      } else if (required > 0 && q <= required * 0.5) {
+        condition_status = 'missing';
+      } else if (required > 0 && observedQuantity <= required * 0.5) {
         // "Low stock at 50% or below"
         lowStock = true;
         belowHalf = true;
+        condition_status = 'half';
+      } else {
+        condition_status = 'full';
       }
       // Optional secondary trigger: explicit fixed-quantity restock threshold.
       if (
         spec.restock_threshold_type === 'fixed_quantity' &&
         spec.restock_threshold_quantity != null &&
-        q > 0 &&
-        q <= spec.restock_threshold_quantity
+        observedQuantity != null &&
+        observedQuantity > 0 &&
+        observedQuantity <= spec.restock_threshold_quantity
       ) {
         lowStock = true;
+        if (condition_status === 'full') condition_status = 'half';
       }
       break;
     }
@@ -184,33 +217,39 @@ export function evaluateItem(spec: BoxItemSpec, obs: Observation, now: Date): Ev
       switch (observedVolume) {
         case 'Full':
         case 'Three Quarter':
+          condition_status = 'full';
           break;
         case 'Half':
         case 'Below Half':
           lowStock = true;
           belowHalf = true;
+          condition_status = 'half';
           break;
         case 'Empty':
           missing = true;
           belowHalf = true;
+          condition_status = 'empty';
           break;
         default:
-          missing = true; // unreadable -> treat as missing (validation should catch first)
+          condition_status = 'pending'; // no reading yet
       }
       break;
     }
     case 'present_absent': {
       switch (observedPresent) {
         case 'Present':
+          condition_status = 'available';
           break;
         case 'Missing':
           missing = true;
+          condition_status = 'missing';
           break;
         case 'Damaged':
           damaged = true;
+          condition_status = 'damaged';
           break;
         default:
-          missing = true;
+          condition_status = 'pending';
       }
       break;
     }
@@ -218,14 +257,21 @@ export function evaluateItem(spec: BoxItemSpec, obs: Observation, now: Date): Ev
 
   if (expiryStatus === 'missing_not_replaced') {
     missing = true;
+    if (condition_status === 'pending' || condition_status === 'full' || condition_status === 'available') {
+      condition_status = 'missing';
+    }
   }
 
-  // Expiry
+  // Layer B: expiry.
   let isExpired = false;
   let expiresSoon = false;
   const effectiveExpiryDate = getEffectiveExpiryDate(spec, obs);
   const noExpiryDateRecorded = Boolean(spec.has_expiry && !effectiveExpiryDate);
-  const expiryLabelMismatch = expiryStatus === 'different_date' || expiryStatus === 'no_label';
+  // A real mismatch is a CORRECTION to an existing saved date, or a missing
+  // label. A first-time baseline record (no prior saved date) is not a mismatch.
+  const expiryLabelMismatch =
+    (expiryStatus === 'different_date' && spec.current_expiry_date != null) ||
+    expiryStatus === 'no_label';
   if (expiryStatus === 'expired') {
     isExpired = true;
   } else if (spec.has_expiry && effectiveExpiryDate) {
@@ -239,7 +285,17 @@ export function evaluateItem(spec: BoxItemSpec, obs: Observation, now: Date): Ev
     }
   }
 
-  // Single status label, most-severe-wins.
+  const expiryVerified = !spec.has_expiry || expiryStatus !== null;
+  let expiry_state: ItemExpiryState;
+  if (!spec.has_expiry) expiry_state = 'not_required';
+  else if (expiryStatus === null) expiry_state = 'pending_verification';
+  else if (expiryStatus === 'no_label') expiry_state = 'no_label';
+  else if (noExpiryDateRecorded) expiry_state = 'not_recorded';
+  else if (isExpired) expiry_state = 'expired';
+  else if (expiresSoon) expiry_state = 'expiring_soon';
+  else expiry_state = 'valid';
+
+  // Stored single status label, most-severe-wins (unchanged vocabulary).
   let item_status: ItemStatus;
   if (isExpired) item_status = 'Expired';
   else if (expiryStatus === 'no_label') item_status = 'Expiry Label Mismatch';
@@ -259,6 +315,17 @@ export function evaluateItem(spec: BoxItemSpec, obs: Observation, now: Date): Ev
     belowHalf ||
     expiryStatus === 'no_label' ||
     noExpiryDateRecorded;
+
+  // Layer C: the single badge-facing verdict. An expiry-tracked item is never
+  // "ok" until the inspector has explicitly verified expiry (the false-OK fix).
+  let final_item_status: FinalItemStatus;
+  if (condition_status === 'pending') final_item_status = 'pending';
+  else if (spec.has_expiry && !expiryVerified) final_item_status = 'incomplete';
+  else if (isExpired) final_item_status = 'replacement_required';
+  else if (missing || damaged || expiryStatus === 'no_label' || expiryStatus === 'missing_not_replaced')
+    final_item_status = 'issue_found';
+  else if (lowStock || belowHalf || expiresSoon) final_item_status = 'topup_required';
+  else final_item_status = 'ok';
 
   let priority: Priority = 'Low';
   if (
@@ -286,6 +353,10 @@ export function evaluateItem(spec: BoxItemSpec, obs: Observation, now: Date): Ev
     expiry_label_mismatch: expiryLabelMismatch,
     no_expiry_date_recorded: noExpiryDateRecorded,
     item_status,
+    condition_status,
+    expiry_state,
+    expiry_verified: expiryVerified,
+    final_item_status,
     is_below_half: belowHalf,
     is_expired: isExpired,
     expires_soon: expiresSoon,

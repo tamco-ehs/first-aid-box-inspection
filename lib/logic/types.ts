@@ -50,6 +50,41 @@ export type ExpiryReminderStatus =
 
 export type ExpiryAuditSource = 'replacement' | 'inspection_correction' | 'admin_correction';
 
+// --- Three-layer item status (the inspection form's mental model) -------------
+// Kept internal/derived; nothing new is persisted. `item_status` (above) is the
+// stored enum for inspection_items; `final_item_status` is what the UI badge
+// shows so an expiry-tracked item is never "OK" until expiry is verified.
+
+/** Layer A - what the physical stock looks like. */
+export type ConditionStatus =
+  | 'pending'
+  | 'full'
+  | 'half'
+  | 'empty'
+  | 'available'
+  | 'missing'
+  | 'damaged';
+
+/** Layer B - the expiry picture for this item. */
+export type ItemExpiryState =
+  | 'not_required'
+  | 'valid'
+  | 'expiring_soon'
+  | 'expired'
+  | 'not_recorded'
+  | 'no_label'
+  | 'mismatch'
+  | 'pending_verification';
+
+/** Layer C - the single badge-facing verdict (condition + expiry combined). */
+export type FinalItemStatus =
+  | 'pending'
+  | 'ok'
+  | 'incomplete'
+  | 'issue_found'
+  | 'topup_required'
+  | 'replacement_required';
+
 /** The expected setup of one item in a box (from box_items joined with template). */
 export interface BoxItemSpec {
   box_item_id: string;
@@ -92,6 +127,11 @@ export interface EvaluatedItem {
   expiry_label_mismatch: boolean;
   no_expiry_date_recorded: boolean;
   item_status: ItemStatus;
+  // Derived three-layer view (not persisted; drives the form UI):
+  condition_status: ConditionStatus;
+  expiry_state: ItemExpiryState;
+  expiry_verified: boolean;
+  final_item_status: FinalItemStatus;
   is_below_half: boolean;
   is_expired: boolean;
   expires_soon: boolean;
