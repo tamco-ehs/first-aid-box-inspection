@@ -288,8 +288,10 @@ interface DashboardAction {
   priority: 'High' | 'Medium' | 'Low';
   boxId: string;
   boxCode: string;
+  boxName: string;
   area: string;
   itemName: string;
+  itemPhotoUrl: string | null;
   issue: string;
   requiredAction: string;
   observed: string;
@@ -300,6 +302,15 @@ interface DashboardAction {
   requestedAt: string;
   topupId?: string;
   href: string;
+}
+
+interface DashboardActionGroup {
+  boxId: string;
+  boxCode: string;
+  boxName: string;
+  area: string;
+  actions: DashboardAction[];
+  sortRank: number;
 }
 
 function ActionTab({
@@ -325,33 +336,47 @@ function ActionTab({
   isAdmin: boolean;
   onChanged: () => void;
 }) {
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const actions = useMemo(() => buildActionQueue(data, boxes, boxById), [data, boxes, boxById]);
   const counts = useMemo(() => actionCounts(actions), [actions]);
-  const visible = actions.filter((a) => filter === 'all' || a.category === filter);
+  const visible = useMemo(() => actions.filter((a) => filter === 'all' || a.category === filter), [actions, filter]);
+  const groups = useMemo(() => groupDashboardActionsByBox(visible, boxById), [visible, boxById]);
 
-  async function markDone(action: DashboardAction) {
-    if (!action.topupId) return;
-    setBusyId(action.id);
+  async function setTopupStatus(actionsToUpdate: DashboardAction[], status: ReportTopup['status'], remarks?: string) {
+    const topupIds = actionsToUpdate.map((a) => a.topupId).filter((id): id is string => Boolean(id));
+    if (topupIds.length === 0) {
+      setActionError('Select at least one top-up item first.');
+      return;
+    }
+    setBusyKey(bulkActionKey(status, actionsToUpdate));
     setActionError(null);
     try {
       const sb = getSupabaseBrowserClient();
       const { data: u } = await sb.auth.getUser();
+      const done = status === 'Completed';
+      const patch: Record<string, unknown> = {
+        status,
+        completed_by: done ? u.user?.id ?? null : null,
+        completed_at: done ? new Date().toISOString() : null,
+      };
+      if (remarks) patch.remarks = remarks;
       const { error } = await sb
         .from('topup_requests')
-        .update({
-          status: 'Completed',
-          completed_by: u.user?.id ?? null,
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', action.topupId);
+        .update(patch)
+        .in('id', topupIds);
       if (error) throw new Error(error.message);
+      setSelected((prev) => {
+        const next = { ...prev };
+        for (const action of actionsToUpdate) delete next[action.id];
+        return next;
+      });
       onChanged();
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not close action.');
+      setActionError(e instanceof Error ? e.message : 'Could not update action items.');
     } finally {
-      setBusyId(null);
+      setBusyKey(null);
     }
   }
 
@@ -402,22 +427,26 @@ function ActionTab({
       <div className="flex items-end justify-between gap-3">
         <SectionTitle
           title="Today's Action Queue"
-          subtitle="Sorted by readiness risk first, then top-up, expiry and overdue inspection."
+          subtitle="Grouped by box so stock can be prepared and issued in one trip."
         />
-        <span className="text-sm font-semibold text-slate-500">{visible.length} shown</span>
+        <span className="text-sm font-semibold text-slate-500">
+          {groups.length} box{groups.length === 1 ? '' : 'es'} / {visible.length} item{visible.length === 1 ? '' : 's'}
+        </span>
       </div>
 
       {visible.length === 0 ? (
         <Empty label="No actions in this filter." />
       ) : (
         <div className="space-y-3">
-          {visible.map((action) => (
-            <ActionCard
-              key={action.id}
-              action={action}
-              canClose={isAdmin && Boolean(action.topupId)}
-              busy={busyId === action.id}
-              onDone={() => markDone(action)}
+          {groups.map((group) => (
+            <DashboardActionBoxGroup
+              key={group.boxId}
+              group={group}
+              isAdmin={isAdmin}
+              selected={selected}
+              busyKey={busyKey}
+              onToggle={(ids, checked) => toggleSelectedIds(ids, checked, setSelected)}
+              onSetStatus={setTopupStatus}
             />
           ))}
         </div>
@@ -461,49 +490,146 @@ function ReadinessCard({
   );
 }
 
-function ActionCard({
-  action,
-  canClose,
-  busy,
-  onDone,
+function DashboardActionBoxGroup({
+  group,
+  isAdmin,
+  selected,
+  busyKey,
+  onToggle,
+  onSetStatus,
 }: {
-  action: DashboardAction;
-  canClose: boolean;
-  busy: boolean;
-  onDone: () => void;
+  group: DashboardActionGroup;
+  isAdmin: boolean;
+  selected: Record<string, boolean>;
+  busyKey: string | null;
+  onToggle: (ids: string[], checked: boolean) => void;
+  onSetStatus: (actions: DashboardAction[], status: ReportTopup['status'], remarks?: string) => void;
 }) {
+  const issuable = group.actions.filter(isIssuableAction);
+  const selectedActions = issuable.filter((a) => selected[a.id]);
+  const allSelected = issuable.length > 0 && selectedActions.length === issuable.length;
+  const issueSelectedBusy = busyKey === bulkActionKey('Completed', selectedActions);
+  const waitingSelectedBusy = busyKey === bulkActionKey('In Progress', selectedActions);
+  const issueAllBusy = busyKey === bulkActionKey('Completed', issuable);
+  const highCount = group.actions.filter((a) => a.priority === 'High').length;
+  const notReadyCount = group.actions.filter((a) => a.category === 'not_ready').length;
+  const topupCount = group.actions.filter((a) => a.category === 'topup').length;
+  const expiryCount = group.actions.filter((a) => a.category === 'expiry').length;
+  const overdueCount = group.actions.filter((a) => a.category === 'overdue').length;
+
   return (
-    <article className="card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <PriorityBadge priority={action.priority} />
-          <p className="mt-2 text-sm font-semibold text-slate-500">
-            {action.boxCode} | {action.area}
+    <section className="card overflow-hidden" data-tour="topup-box-group">
+      <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50 p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-lg font-bold">{group.boxCode}</h3>
+            <Badge tone={notReadyCount > 0 || overdueCount > 0 ? 'bad' : 'warn'}>
+              {group.actions.length} action{group.actions.length === 1 ? '' : 's'}
+            </Badge>
+            {highCount > 0 && <Badge tone="bad">{highCount} high</Badge>}
+          </div>
+          <p className="mt-1 text-sm text-slate-600">
+            {group.boxName}{group.area ? ` - ${group.area}` : ''}
           </p>
         </div>
-        <Badge tone={actionTone(action.category)}>{action.status}</Badge>
+        <div className="flex flex-wrap gap-2 text-xs">
+          {notReadyCount > 0 && <Badge tone="bad">{notReadyCount} not ready</Badge>}
+          {topupCount > 0 && <Badge tone="warn">{topupCount} top-up</Badge>}
+          {expiryCount > 0 && <Badge tone="warn">{expiryCount} expiry</Badge>}
+          {overdueCount > 0 && <Badge tone="bad">{overdueCount} overdue</Badge>}
+        </div>
       </div>
 
-      <h3 className="mt-3 text-lg font-bold">{action.itemName}</h3>
-      <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-        <MiniFact label="Issue" value={action.issue} strong />
-        <MiniFact label="Action" value={action.requiredAction} strong />
-        <MiniFact label="Observed" value={action.observed} />
-        <MiniFact label="Required" value={action.required} />
-        {action.expiryDate && <MiniFact label="Expiry" value={formatDate(action.expiryDate)} />}
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {canClose && (
-          <button type="button" className="btn btn-md bg-emerald-600 text-white hover:bg-emerald-700" onClick={onDone} disabled={busy}>
-            {busy ? <Spinner className="h-4 w-4" /> : 'Mark done'}
+      {isAdmin && issuable.length > 0 && (
+        <div className="flex flex-wrap gap-2 border-b border-slate-100 p-3">
+          <button
+            type="button"
+            className="btn btn-md btn-secondary"
+            onClick={() => onToggle(issuable.map((a) => a.id), !allSelected)}
+          >
+            {allSelected ? 'Clear ticks' : 'Tick all open'}
           </button>
-        )}
-        <a href={action.href} className="btn btn-md btn-secondary">
-          View
-        </a>
+          <button
+            type="button"
+            className="btn btn-md btn-secondary"
+            disabled={selectedActions.length === 0 || Boolean(busyKey)}
+            onClick={() => onSetStatus(selectedActions, 'In Progress', 'Waiting stock')}
+          >
+            {waitingSelectedBusy ? <Spinner className="h-4 w-4" /> : 'Mark waiting stock'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-md bg-emerald-600 text-white hover:bg-emerald-700"
+            disabled={selectedActions.length === 0 || Boolean(busyKey)}
+            onClick={() => onSetStatus(selectedActions, 'Completed')}
+          >
+            {issueSelectedBusy ? <Spinner className="h-4 w-4" /> : `Issue selected (${selectedActions.length})`}
+          </button>
+          <button
+            type="button"
+            className="btn btn-md btn-primary"
+            disabled={issuable.length === 0 || Boolean(busyKey)}
+            onClick={() => onSetStatus(issuable, 'Completed')}
+          >
+            {issueAllBusy ? <Spinner className="h-4 w-4" /> : 'Issue all open'}
+          </button>
+        </div>
+      )}
+
+      <div className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-3">
+        {group.actions.map((action) => (
+          <DashboardActionItem
+            key={action.id}
+            action={action}
+            isAdmin={isAdmin}
+            checked={Boolean(selected[action.id])}
+            onToggle={(checked) => onToggle([action.id], checked)}
+          />
+        ))}
       </div>
-    </article>
+    </section>
+  );
+}
+
+function DashboardActionItem({
+  action,
+  isAdmin,
+  checked,
+  onToggle,
+}: {
+  action: DashboardAction;
+  isAdmin: boolean;
+  checked: boolean;
+  onToggle: (checked: boolean) => void;
+}) {
+  const issuable = isIssuableAction(action);
+  return (
+    <div className={`flex min-h-16 items-center gap-3 rounded-xl border px-3 py-2 ${issuable ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50'}`}>
+      {isAdmin && (
+        <input
+          type="checkbox"
+          className="h-5 w-5 shrink-0 accent-brand"
+          disabled={!issuable}
+          checked={checked}
+          onChange={(e) => onToggle(e.target.checked)}
+          aria-label={`Select ${action.itemName}`}
+        />
+      )}
+      <TopupThumb url={action.itemPhotoUrl} name={action.itemName} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="truncate font-semibold">{action.itemName}</span>
+          <PriorityBadge priority={action.priority} />
+          <Badge tone={actionTone(action.category)}>{actionCategoryLabel(action.category)}</Badge>
+          {action.topupId && <Badge tone={topupStatusTone(action.status as ReportTopup['status'])}>{action.status}</Badge>}
+        </div>
+        <p className="mt-1 truncate text-xs text-slate-500">{action.requiredAction}</p>
+        {action.expiryDate && <p className="text-xs text-slate-500">Exp {formatDate(action.expiryDate)}</p>}
+      </div>
+      <a href={action.href} className="btn btn-md btn-secondary shrink-0 px-3 py-2 text-xs">
+        View
+      </a>
+    </div>
   );
 }
 
@@ -538,6 +664,57 @@ function toneToClass(t: ReportTone) {
 
 function actionTone(category: ActionCategory): ReportTone {
   return category === 'not_ready' || category === 'overdue' ? 'bad' : 'warn';
+}
+
+function actionCategoryLabel(category: ActionCategory) {
+  if (category === 'not_ready') return 'Not ready';
+  if (category === 'topup') return 'Top-up';
+  if (category === 'expiry') return 'Expiry';
+  return 'Overdue';
+}
+
+function isIssuableAction(action: DashboardAction) {
+  return Boolean(action.topupId) && (action.status === 'Open' || action.status === 'In Progress');
+}
+
+function bulkActionKey(status: ReportTopup['status'], actions: DashboardAction[]) {
+  const ids = actions.map((a) => a.topupId).filter(Boolean).join(',');
+  return `${status}:${ids}`;
+}
+
+function groupDashboardActionsByBox(
+  actions: DashboardAction[],
+  boxById: Map<string, BoxLite>,
+): DashboardActionGroup[] {
+  const groups = new Map<string, DashboardActionGroup>();
+  for (const action of actions) {
+    const box = boxById.get(action.boxId);
+    const group =
+      groups.get(action.boxId) ??
+      {
+        boxId: action.boxId,
+        boxCode: action.boxCode,
+        boxName: box?.box_name ?? action.boxName,
+        area: box?.area ?? action.area,
+        actions: [],
+        sortRank: action.sortRank,
+      };
+    group.actions.push(action);
+    group.sortRank = Math.min(group.sortRank, action.sortRank);
+    groups.set(action.boxId, group);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      actions: group.actions.sort(
+        (a, b) =>
+          a.sortRank - b.sortRank ||
+          (priorityOrder[a.priority] ?? 3) - (priorityOrder[b.priority] ?? 3) ||
+          a.itemName.localeCompare(b.itemName),
+      ),
+    }))
+    .sort((a, b) => a.sortRank - b.sortRank || a.boxCode.localeCompare(b.boxCode));
 }
 
 function ReportsArchive({
@@ -669,8 +846,10 @@ function buildActionQueue(data: ReportsResponse, boxes: BoxLite[], boxById: Map<
       priority,
       boxId: r.box_id,
       boxCode: boxLabel(box, r.box_id),
+      boxName: box?.box_name ?? 'Unknown box',
       area: box?.area ?? 'Unassigned area',
       itemName: r.item_name,
+      itemPhotoUrl: r.item_photo_url,
       issue: r.reason ?? topupIssueFallback(r),
       requiredAction: topupRequiredAction(r, category),
       observed: topupObservedText(r),
@@ -696,8 +875,10 @@ function buildActionQueue(data: ReportsResponse, boxes: BoxLite[], boxById: Map<
       priority,
       boxId: r.box_id,
       boxCode: boxLabel(box, r.box_id),
+      boxName: box?.box_name ?? 'Unknown box',
       area: box?.area ?? 'Unassigned area',
       itemName: r.item_name,
+      itemPhotoUrl: null,
       issue: expiryIssueText(r.expiry_status),
       requiredAction: expiryAction(r.expiry_status),
       observed: r.expiry_status,
@@ -725,8 +906,10 @@ function buildActionQueue(data: ReportsResponse, boxes: BoxLite[], boxById: Map<
       priority: 'High',
       boxId: box.id,
       boxCode: box.box_code,
+      boxName: box.box_name,
       area: box.area ?? 'Unassigned area',
       itemName: 'Inspection overdue',
+      itemPhotoUrl: null,
       issue: `${due.days_overdue} day${due.days_overdue === 1 ? '' : 's'} overdue`,
       requiredAction: 'Complete inspection now',
       observed: formatDate(lastByBox.get(box.id) ?? null),
