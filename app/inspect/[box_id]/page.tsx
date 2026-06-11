@@ -37,6 +37,9 @@ interface ItemReview {
   tone: 'neutral' | 'ok' | 'warn';
   topupRequired: boolean;
   expired: boolean;
+  expiringSoon: boolean;
+  noExpiryDateRecorded: boolean;
+  expiryLabelMismatch: boolean;
   missing: boolean;
   hasRemarks: boolean;
 }
@@ -154,13 +157,16 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
         tone: 'neutral',
         topupRequired: false,
         expired: false,
+        expiringSoon: false,
+        noExpiryDateRecorded: false,
+        expiryLabelMismatch: false,
         missing: false,
         hasRemarks: Boolean(value.remarks?.trim()),
       };
     }
 
     const evaluated = evaluateItem(toSpec(item), value, now);
-    const noExpiryLabel = value.expiry_quick_option === 'no_label';
+    const noExpiryLabel = value.expiry_validation_status === 'no_label' || value.expiry_quick_option === 'no_label';
     const issue = noExpiryLabel || evaluated.topup_required || evaluated.item_status !== 'OK';
     const detail = noExpiryLabel ? 'No expiry label' : issue ? evaluated.item_status : null;
 
@@ -171,6 +177,9 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
       tone: issue ? 'warn' : 'ok',
       topupRequired: issue,
       expired: noExpiryLabel ? false : evaluated.is_expired,
+      expiringSoon: evaluated.expires_soon,
+      noExpiryDateRecorded: evaluated.no_expiry_date_recorded,
+      expiryLabelMismatch: evaluated.expiry_label_mismatch,
       missing: evaluated.item_status === 'Missing',
       hasRemarks: Boolean(value.remarks?.trim()),
     };
@@ -281,6 +290,9 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
       previous.observed_volume_level !== next.observed_volume_level ||
       previous.observed_present_status !== next.observed_present_status ||
       previous.expiry_date !== next.expiry_date ||
+      previous.expiry_validation_status !== next.expiry_validation_status ||
+      previous.replacement_date !== next.replacement_date ||
+      previous.replacement_photo_url !== next.replacement_photo_url ||
       previous.expiry_quick_option !== next.expiry_quick_option;
 
     setObs((p) => ({ ...p, [item.box_item_id]: next }));
@@ -312,6 +324,16 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
             observed_volume_level: o.observed_volume_level ?? null,
             observed_present_status: o.observed_present_status ?? null,
             expiry_date: o.expiry_date ?? null,
+            expiry_validation_status:
+              o.expiry_validation_status ??
+              (o.expiry_quick_option === 'no_label'
+                ? 'no_label'
+                : o.expiry_quick_option === 'expired'
+                  ? 'expired'
+                  : null),
+            replacement_date: o.replacement_date ?? null,
+            replacement_photo_url: o.replacement_photo_url ?? null,
+            replacement_photo_cloudinary_public_id: o.replacement_photo_cloudinary_public_id ?? null,
             remarks: o.remarks ?? null,
           };
         }),
@@ -341,6 +363,9 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const pendingCount = itemReviews.filter((r) => r.status === 'Pending').length;
   const topupCount = itemReviews.filter((r) => r.topupRequired).length;
   const expiredCount = itemReviews.filter((r) => r.expired).length;
+  const expiringSoonCount = itemReviews.filter((r) => r.expiringSoon).length;
+  const noExpiryDateCount = itemReviews.filter((r) => r.noExpiryDateRecorded).length;
+  const expiryMismatchCount = itemReviews.filter((r) => r.expiryLabelMismatch).length;
   const missingCount = itemReviews.filter((r) => r.missing).length;
   const remarksOrIssueCount = tpl.items.filter((it, i) => itemReviews[i]!.status === 'Issue found' || obs[it.box_item_id]?.remarks?.trim()).length;
   const progressPercent = Math.round((checkedCount / Math.max(1, tpl.items.length)) * 100);
@@ -428,6 +453,23 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
               <SummaryTile label="Missing" value={missingCount} tone="bad" />
               <SummaryTile label="Remarks/issues" value={remarksOrIssueCount} tone="warn" />
             </div>
+            {(expiredCount > 0 || expiringSoonCount > 0 || expiryMismatchCount > 0 || noExpiryDateCount > 0) && (
+              <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <p className="font-semibold">Expiry issues</p>
+                <ul className="mt-1 list-inside list-disc space-y-0.5">
+                  {expiredCount > 0 && <li>{expiredCount} item{expiredCount === 1 ? '' : 's'} expired</li>}
+                  {expiringSoonCount > 0 && (
+                    <li>{expiringSoonCount} item{expiringSoonCount === 1 ? '' : 's'} expiring soon</li>
+                  )}
+                  {expiryMismatchCount > 0 && (
+                    <li>{expiryMismatchCount} item{expiryMismatchCount === 1 ? '' : 's'} with label mismatch/no label</li>
+                  )}
+                  {noExpiryDateCount > 0 && (
+                    <li>{noExpiryDateCount} item{noExpiryDateCount === 1 ? '' : 's'} with no expiry date recorded</li>
+                  )}
+                </ul>
+              </div>
+            )}
             <button type="button" onClick={() => goToItem(0)} className="btn btn-md btn-secondary mt-4 w-full">
               Back to items
             </button>

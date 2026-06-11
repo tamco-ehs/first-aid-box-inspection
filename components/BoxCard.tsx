@@ -3,6 +3,13 @@ import { DueBadge } from '@/components/StatusBadge';
 import { formatDate } from '@/lib/client/format.ts';
 
 export function BoxCard({ box }: { box: MyBox }) {
+  const expiryIssues =
+    box.expiry_summary.expired +
+    box.expiry_summary.expiring_30 +
+    box.expiry_summary.expiring_60 +
+    box.expiry_summary.missing_date +
+    box.expiry_summary.mismatch;
+
   return (
     <div className="card p-4">
       <div className="flex items-start justify-between gap-3">
@@ -27,6 +34,19 @@ export function BoxCard({ box }: { box: MyBox }) {
         <dt className="text-slate-500">Due date</dt>
         <dd className="text-right">{formatDate(box.next_due_date)}</dd>
       </dl>
+
+      {expiryIssues > 0 && (
+        <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="font-semibold">Expiry attention</p>
+          <p>
+            {box.expiry_summary.expired > 0 && `${box.expiry_summary.expired} expired. `}
+            {box.expiry_summary.expiring_30 > 0 && `${box.expiry_summary.expiring_30} due within 30d. `}
+            {box.expiry_summary.expiring_60 > 0 && `${box.expiry_summary.expiring_60} due within 60d. `}
+            {box.expiry_summary.missing_date > 0 && `${box.expiry_summary.missing_date} missing date. `}
+            {box.expiry_summary.mismatch > 0 && `${box.expiry_summary.mismatch} label issue. `}
+          </p>
+        </div>
+      )}
 
       <a href={`/inspect/${box.box_id}`} className="btn btn-lg btn-primary mt-4 w-full">
         Start inspection

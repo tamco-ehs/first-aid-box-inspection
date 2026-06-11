@@ -13,6 +13,7 @@ export function toSpec(item: TemplateItem): BoxItemSpec {
     measurement_type: item.measurement_type,
     required_quantity: item.required_quantity,
     has_expiry: item.has_expiry,
+    current_expiry_date: item.current_expiry_date,
     expiry_warning_days: item.expiry_warning_days,
     is_critical: item.is_critical,
     // restock thresholds are server-side only; preview omits them

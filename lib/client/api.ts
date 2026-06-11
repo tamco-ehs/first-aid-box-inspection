@@ -65,6 +65,10 @@ export interface InspectionSubmitBody {
     observed_volume_level?: string | null;
     observed_present_status?: string | null;
     expiry_date?: string | null;
+    expiry_validation_status?: string | null;
+    replacement_date?: string | null;
+    replacement_photo_url?: string | null;
+    replacement_photo_cloudinary_public_id?: string | null;
     remarks?: string | null;
   }>;
 }

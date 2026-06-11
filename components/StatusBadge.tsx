@@ -30,6 +30,8 @@ const itemTone: Record<ItemStatus, Tone> = {
   OK: 'ok',
   'Low Stock': 'warn',
   'Expiring Soon': 'warn',
+  'No Expiry Date': 'bad',
+  'Expiry Label Mismatch': 'warn',
   Missing: 'bad',
   Expired: 'bad',
   Damaged: 'bad',

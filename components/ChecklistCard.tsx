@@ -3,9 +3,12 @@
 import { useMemo } from 'react';
 import type { DraftObservation } from '@/lib/client/draft.ts';
 import type { PresentStatus, TemplateItem, VolumeLevel } from '@/lib/client/types.ts';
+import { formatDate, todayIso } from '@/lib/client/format.ts';
 import { evaluateItem } from '@/lib/logic/inspection.ts';
+import type { ExpiryValidationStatus } from '@/lib/logic/types.ts';
 import { hasObservation, toSpec } from '@/lib/client/inspect-helpers.ts';
 import { ItemPhoto } from '@/components/ItemPhoto';
+import { PhotoCapture } from '@/components/PhotoCapture';
 import { Badge, ItemStatusBadge } from '@/components/StatusBadge';
 
 const VOLUME_LEVELS: VolumeLevel[] = ['Full', 'Half', 'Empty'];
@@ -30,11 +33,13 @@ const toneClass = {
   },
 };
 
-function yesterdayIso(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
+const EXPIRY_OPTIONS: [ExpiryValidationStatus, string][] = [
+  ['matches_label', 'Matches label'],
+  ['different_date', 'Different date'],
+  ['no_label', 'No label'],
+  ['expired', 'Expired'],
+  ['replaced_now', 'Replaced now'],
+];
 
 export function ChecklistCard({
   item,
@@ -56,11 +61,47 @@ export function ChecklistCard({
 
   const requiredLabel =
     item.measurement_type === 'quantity'
-      ? `Required: ${item.required_quantity ?? '—'} ${item.unit ?? ''}`.trim()
+      ? `Required: ${item.required_quantity ?? '-'} ${item.unit ?? ''}`.trim()
       : item.measurement_type === 'volume_level'
         ? 'Check fill level'
         : 'Check presence / condition';
   const hasIssue = Boolean(live && (live.topup_required || live.item_status !== 'OK'));
+  const expiryChoice: ExpiryValidationStatus | null =
+    value.expiry_validation_status ??
+    (value.expiry_quick_option === 'no_label'
+      ? 'no_label'
+      : value.expiry_quick_option === 'expired'
+        ? 'expired'
+        : null);
+
+  function setExpiryChoice(status: ExpiryValidationStatus) {
+    const patch: Partial<DraftObservation> = {
+      expiry_validation_status: status,
+      expiry_quick_option: null,
+    };
+    if (status === 'matches_label' || status === 'no_label' || status === 'expired' || status === 'missing_not_replaced') {
+      patch.expiry_date = null;
+    }
+    if (status === 'different_date') {
+      patch.expiry_date = value.expiry_date ?? item.current_expiry_date ?? null;
+    }
+    if (status === 'replaced_now') {
+      patch.expiry_date = value.expiry_date ?? null;
+      patch.replacement_date = value.replacement_date ?? todayIso();
+      if (item.measurement_type === 'quantity') patch.observed_quantity = item.required_quantity ?? value.observed_quantity ?? 1;
+      if (item.measurement_type === 'volume_level') patch.observed_volume_level = 'Full';
+      if (item.measurement_type === 'present_absent') patch.observed_present_status = 'Present';
+    }
+    if ((status === 'no_label' || status === 'expired' || status === 'missing_not_replaced') && !value.remarks?.trim()) {
+      patch.remarks =
+        status === 'no_label'
+          ? 'No expiry label found.'
+          : status === 'expired'
+            ? 'Physical item is expired.'
+            : 'Item missing and not replaced during inspection.';
+    }
+    set(patch);
+  }
 
   return (
     <div className="card p-3">
@@ -69,11 +110,7 @@ export function ChecklistCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-semibold leading-tight">{item.item_name}</h3>
-            {live ? (
-              <ItemStatusBadge status={live.item_status} />
-            ) : (
-              <Badge tone="neutral">Pending</Badge>
-            )}
+            {live ? <ItemStatusBadge status={live.item_status} /> : <Badge tone="neutral">Pending</Badge>}
           </div>
           <p className="mt-0.5 text-xs text-slate-500">
             {requiredLabel}
@@ -82,7 +119,6 @@ export function ChecklistCard({
         </div>
       </div>
 
-      {/* Measurement input */}
       <div className="mt-3">
         {item.measurement_type === 'quantity' && (
           <label className="block">
@@ -142,54 +178,91 @@ export function ChecklistCard({
         )}
       </div>
 
-      {/* Expiry */}
       {item.has_expiry && (
-        <label className="mt-3 block">
-          <span className="label">
-            Expiry date <span className="text-red-600">*</span>
-          </span>
-          <input
-            type="date"
-            className="input min-h-12 py-2"
-            value={value.expiry_date ?? ''}
-            onChange={(e) => set({ expiry_date: e.target.value || null, expiry_quick_option: null })}
-          />
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                set({
-                  expiry_date: yesterdayIso(),
-                  expiry_quick_option: 'no_label',
-                  remarks: value.remarks?.trim() ? value.remarks : 'No expiry label found.',
-                })
-              }
-              className={`btn btn-secondary min-h-11 px-3 text-sm ${
-                value.expiry_quick_option === 'no_label' ? 'border-amber-500 bg-amber-50 text-amber-800' : ''
-              }`}
-            >
-              No expiry label found
-            </button>
-            <button
-              type="button"
-              onClick={() => set({ expiry_date: yesterdayIso(), expiry_quick_option: 'expired' })}
-              className={`btn btn-secondary min-h-11 px-3 text-sm ${
-                value.expiry_quick_option === 'expired' ? 'border-red-500 bg-red-50 text-red-800' : ''
-              }`}
-            >
-              Expired
-            </button>
+        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <span className="label">Expiry validation</span>
+              <p className="text-sm font-semibold">
+                System date: {item.current_expiry_date ? formatDate(item.current_expiry_date) : 'Not recorded'}
+              </p>
+            </div>
+            {item.expiry_status && (
+              <Badge
+                tone={
+                  item.expiry_status === 'Expired' || item.expiry_status === 'No expiry date recorded'
+                    ? 'bad'
+                    : item.expiry_status === 'Valid'
+                      ? 'ok'
+                      : 'warn'
+                }
+              >
+                {item.expiry_status}
+              </Badge>
+            )}
           </div>
-          {live?.is_expired && (
-            <span className="mt-1 block text-sm font-bold text-red-600">⚠ Expired — replace immediately</span>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {EXPIRY_OPTIONS.map(([status, label]) => (
+              <button
+                type="button"
+                key={status}
+                onClick={() => setExpiryChoice(status)}
+                className={`btn btn-secondary min-h-11 px-3 text-sm ${
+                  expiryChoice === status ? 'border-brand bg-red-50 text-brand' : ''
+                } ${status === 'replaced_now' ? 'col-span-2' : ''}`}
+                aria-pressed={expiryChoice === status}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {(expiryChoice === 'different_date' || expiryChoice === 'replaced_now') && (
+            <div className="mt-3 grid gap-3">
+              <label className="block">
+                <span className="label">New expiry date</span>
+                <input
+                  type="date"
+                  className="input min-h-12 py-2"
+                  value={value.expiry_date ?? ''}
+                  onChange={(e) => set({ expiry_date: e.target.value || null, expiry_quick_option: null })}
+                />
+              </label>
+              {expiryChoice === 'replaced_now' && (
+                <>
+                  <label className="block">
+                    <span className="label">Replacement date</span>
+                    <input
+                      type="date"
+                      className="input min-h-12 py-2"
+                      value={value.replacement_date ?? todayIso()}
+                      onChange={(e) => set({ replacement_date: e.target.value || null })}
+                    />
+                  </label>
+                  <div>
+                    <span className="label">Replacement photo (optional)</span>
+                    <PhotoCapture
+                      initialUrl={value.replacement_photo_url ?? null}
+                      onChange={(next) =>
+                        set({
+                          replacement_photo_url: next?.url ?? null,
+                          replacement_photo_cloudinary_public_id: next?.publicId ?? null,
+                        })
+                      }
+                    />
+                  </div>
+                </>
+              )}
+            </div>
           )}
-          {live?.expires_soon && (
-            <span className="mt-1 block text-sm font-semibold text-amber-700">Expiring soon</span>
+
+          {expiryChoice === 'expired' && (
+            <p className="mt-2 text-sm font-semibold text-red-700">Replacement will be required.</p>
           )}
-        </label>
+        </div>
       )}
 
-      {/* Remarks */}
       <label className="mt-3 block">
         <span className="label">{hasIssue ? 'Remarks (required for issue)' : 'Remarks (optional)'}</span>
         <input

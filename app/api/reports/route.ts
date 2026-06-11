@@ -22,6 +22,7 @@ async function buildDashboard(admin: Admin) {
   const now = new Date();
   const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
   const today = now.toISOString().slice(0, 10);
+  const urgent = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
   const soon = new Date(now.getTime() + 60 * 86_400_000).toISOString().slice(0, 10);
 
   const total_boxes = await headCount(
@@ -93,6 +94,43 @@ async function buildDashboard(admin: Admin) {
     ((soonItems ?? []) as { box_id: string }[]).map((i) => i.box_id),
   ).size;
 
+  const { data: urgentItems } = await admin
+    .from('box_items')
+    .select('box_id')
+    .eq('is_active', true)
+    .eq('has_expiry', true)
+    .gte('expiry_date', today)
+    .lte('expiry_date', urgent);
+  const items_expiring_within_30_days = (urgentItems ?? []).length;
+
+  const { data: missingExpiryDateItems } = await admin
+    .from('box_items')
+    .select('box_id')
+    .eq('is_active', true)
+    .eq('has_expiry', true)
+    .is('expiry_date', null);
+  const { data: missingExpiryStatusItems } = await admin
+    .from('box_items')
+    .select('box_id')
+    .eq('is_active', true)
+    .eq('has_expiry', true)
+    .eq('expiry_status', 'No expiry date recorded');
+  const boxes_with_missing_expiry_dates = new Set(
+    ([...(missingExpiryDateItems ?? []), ...(missingExpiryStatusItems ?? [])] as { box_id: string }[]).map(
+      (i) => i.box_id,
+    ),
+  ).size;
+
+  const { data: mismatchItems } = await admin
+    .from('box_items')
+    .select('box_id')
+    .eq('is_active', true)
+    .eq('has_expiry', true)
+    .eq('expiry_status', 'Expiry label mismatch');
+  const boxes_with_expiry_label_mismatch = new Set(
+    ((mismatchItems ?? []) as { box_id: string }[]).map((i) => i.box_id),
+  ).size;
+
   const usage_logs_this_month = await headCount(
     admin
       .from('first_aid_usage_logs')
@@ -107,6 +145,9 @@ async function buildDashboard(admin: Admin) {
     boxes_needing_topup,
     boxes_with_expired_items,
     boxes_with_expiring_soon_items,
+    boxes_with_missing_expiry_dates,
+    boxes_with_expiry_label_mismatch,
+    items_expiring_within_30_days,
     open_topup_requests,
     usage_logs_this_month,
   };
@@ -196,6 +237,18 @@ export async function GET(req: Request): Promise<Response> {
     if (areaBoxIds) tq = tq.in('box_id', areaBoxIds);
     const { data: topups } = await tq;
 
+    // --- current expiry reminders from per-box inventory ---
+    let eq = admin
+      .from('box_items')
+      .select('id, box_id, item_name, expiry_date, expiry_status, last_verified_date, last_replaced_date')
+      .eq('is_active', true)
+      .eq('has_expiry', true)
+      .neq('expiry_status', 'Valid')
+      .limit(500);
+    if (f.box_id) eq = eq.eq('box_id', f.box_id);
+    if (areaBoxIds) eq = eq.in('box_id', areaBoxIds);
+    const { data: expiryItems } = await eq;
+
     // --- usage logs ---
     let uq = admin
       .from('first_aid_usage_logs')
@@ -216,6 +269,7 @@ export async function GET(req: Request): Promise<Response> {
       dashboard,
       inspections: inspections ?? [],
       inspection_items,
+      expiry_items: expiryItems ?? [],
       topup_requests: topups ?? [],
       usage_logs: usage ?? [],
     });

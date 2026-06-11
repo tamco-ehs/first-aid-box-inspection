@@ -17,6 +17,14 @@ const isoDate = z
 
 const volumeLevel = z.enum(['Full', 'Three Quarter', 'Half', 'Below Half', 'Empty']);
 const presentStatus = z.enum(['Present', 'Missing', 'Damaged']);
+const expiryValidationStatus = z.enum([
+  'matches_label',
+  'different_date',
+  'no_label',
+  'expired',
+  'replaced_now',
+  'missing_not_replaced',
+]);
 
 // --- POST /api/inspections ----------------------------------------------------
 export const inspectionItemInput = z
@@ -26,6 +34,10 @@ export const inspectionItemInput = z
     observed_volume_level: volumeLevel.nullish(),
     observed_present_status: presentStatus.nullish(),
     expiry_date: isoDate.nullish(),
+    expiry_validation_status: expiryValidationStatus.nullish(),
+    replacement_date: isoDate.nullish(),
+    replacement_photo_url: z.string().url().max(500).nullish(),
+    replacement_photo_cloudinary_public_id: z.string().max(200).nullish(),
     remarks: z.string().trim().max(1000).nullish(),
   })
   .strict();

@@ -25,6 +25,7 @@ import { INSPECTION_PHOTO_FOLDER, isAllowedCloudinaryUrl } from '@/lib/logic/clo
 import {
   computeOverallStatus,
   evaluateItem,
+  getExpiryReminderStatus,
   summarize,
   validateObservation,
 } from '@/lib/logic/inspection.ts';
@@ -42,6 +43,8 @@ interface SpecRow {
   required_quantity: number | null;
   unit: string | null;
   has_expiry: boolean;
+  expiry_date: string | null;
+  expiry_status: string | null;
   expiry_warning_days: number | null;
   is_critical: boolean;
   restock_threshold_type: BoxItemSpec['restock_threshold_type'];
@@ -94,7 +97,7 @@ export async function POST(req: Request): Promise<Response> {
     const { data: specsData } = await admin
       .from('box_items_effective')
       .select(
-        'id, item_name, measurement_type, required_quantity, unit, has_expiry, expiry_warning_days, is_critical, restock_threshold_type, restock_threshold_quantity',
+        'id, item_name, measurement_type, required_quantity, unit, has_expiry, expiry_date, expiry_status, expiry_warning_days, is_critical, restock_threshold_type, restock_threshold_quantity',
       )
       .eq('box_id', body.box_id)
       .eq('is_active', true);
@@ -105,7 +108,13 @@ export async function POST(req: Request): Promise<Response> {
 
     // 6 + 7. validate every submitted line, then evaluate server-side
     const now = new Date();
-    const lines: { ev: EvaluatedItem; remarks: string | null; unit: string | null }[] = [];
+    const lines: {
+      ev: EvaluatedItem;
+      obs: Observation;
+      spec: SpecRow;
+      remarks: string | null;
+      unit: string | null;
+    }[] = [];
     const seen = new Set<string>();
 
     for (const sub of body.inspection_items) {
@@ -114,12 +123,22 @@ export async function POST(req: Request): Promise<Response> {
       if (seen.has(sub.box_item_id)) throw badRequest('Duplicate item in submission.');
       seen.add(sub.box_item_id);
 
+      if (
+        sub.replacement_photo_url &&
+        !isAllowedCloudinaryUrl(sub.replacement_photo_url, PUBLIC_ENV.cloudinaryCloudName(), [
+          INSPECTION_PHOTO_FOLDER,
+        ])
+      ) {
+        throw badRequest(`"${spec.item_name}": replacement photo must be a valid inspection upload.`);
+      }
+
       const itemSpec: BoxItemSpec = {
         box_item_id: spec.id,
         item_name: spec.item_name,
         measurement_type: spec.measurement_type,
         required_quantity: spec.required_quantity,
         has_expiry: spec.has_expiry,
+        current_expiry_date: spec.expiry_date,
         expiry_warning_days: spec.expiry_warning_days,
         is_critical: spec.is_critical,
         restock_threshold_type: spec.restock_threshold_type,
@@ -130,6 +149,11 @@ export async function POST(req: Request): Promise<Response> {
         observed_volume_level: sub.observed_volume_level ?? null,
         observed_present_status: sub.observed_present_status ?? null,
         expiry_date: sub.expiry_date ?? null,
+        expiry_validation_status: sub.expiry_validation_status ?? null,
+        replacement_date: sub.replacement_date ?? null,
+        replacement_photo_url: sub.replacement_photo_url ?? null,
+        replacement_photo_cloudinary_public_id: sub.replacement_photo_cloudinary_public_id ?? null,
+        remarks: sub.remarks ?? null,
       };
 
       const validationError = validateObservation(itemSpec, obs);
@@ -137,6 +161,8 @@ export async function POST(req: Request): Promise<Response> {
 
       lines.push({
         ev: evaluateItem(itemSpec, obs, now),
+        obs,
+        spec,
         remarks: sub.remarks ?? null,
         unit: spec.unit,
       });
@@ -185,6 +211,10 @@ export async function POST(req: Request): Promise<Response> {
         observed_volume_level: l.ev.observed_volume_level,
         observed_present_status: l.ev.observed_present_status,
         expiry_date: l.ev.expiry_date,
+        system_expiry_date: l.ev.system_expiry_date,
+        expiry_validation_status: l.ev.expiry_validation_status,
+        expiry_label_mismatch: l.ev.expiry_label_mismatch,
+        no_expiry_date_recorded: l.ev.no_expiry_date_recorded,
         item_status: l.ev.item_status,
         is_below_half: l.ev.is_below_half,
         is_expired: l.ev.is_expired,
@@ -262,7 +292,7 @@ export async function POST(req: Request): Promise<Response> {
         }
       }
 
-      // update each box item's last-known state
+      // update each box item's last-known state and expiry verification metadata
       for (const l of lines) {
         const patch: Record<string, unknown> = {};
         if (l.ev.measurement_type === 'quantity') patch.current_quantity = l.ev.observed_quantity;
@@ -270,9 +300,87 @@ export async function POST(req: Request): Promise<Response> {
           patch.current_volume_level = l.ev.observed_volume_level;
         if (l.ev.measurement_type === 'present_absent')
           patch.current_present_status = l.ev.observed_present_status;
-        if (l.ev.expiry_date) patch.expiry_date = l.ev.expiry_date;
+
+        if (l.spec.has_expiry) {
+          const expiryChoice = l.obs.expiry_validation_status ?? null;
+          const newExpiry = l.obs.expiry_date ?? null;
+          const oldExpiry = l.spec.expiry_date ?? null;
+          const nowIso = now.toISOString();
+          const today = nowIso.slice(0, 10);
+
+          if (expiryChoice === 'matches_label') {
+            patch.last_verified_date = nowIso;
+            patch.last_verified_by = ctx.userId;
+            patch.expiry_status =
+              getExpiryReminderStatus(true, oldExpiry, l.spec.expiry_warning_days, l.spec.expiry_status, now) ?? 'Valid';
+          }
+
+          if (expiryChoice === 'different_date' && newExpiry) {
+            patch.expiry_date = newExpiry;
+            patch.last_verified_date = nowIso;
+            patch.last_verified_by = ctx.userId;
+            patch.remarks = l.remarks;
+            patch.expiry_status = getExpiryReminderStatus(true, newExpiry, l.spec.expiry_warning_days, null, now) ?? 'Valid';
+            const { error: auditErr } = await admin.from('expiry_audit_logs').insert({
+              box_id: body.box_id,
+              box_item_id: l.ev.box_item_id,
+              old_expiry_date: oldExpiry,
+              new_expiry_date: newExpiry,
+              changed_by: ctx.userId,
+              reason: l.remarks,
+              source: 'inspection_correction',
+            });
+            if (auditErr) throw auditErr;
+          }
+
+          if (expiryChoice === 'no_label') {
+            patch.last_verified_date = nowIso;
+            patch.last_verified_by = ctx.userId;
+            patch.remarks = l.remarks;
+            patch.expiry_status = 'Expiry label mismatch';
+          }
+
+          if (expiryChoice === 'expired') {
+            patch.last_verified_date = nowIso;
+            patch.last_verified_by = ctx.userId;
+            patch.remarks = l.remarks;
+            patch.expiry_status = 'Expired';
+          }
+
+          if (expiryChoice === 'missing_not_replaced') {
+            patch.last_verified_date = nowIso;
+            patch.last_verified_by = ctx.userId;
+            patch.remarks = l.remarks;
+          }
+
+          if (expiryChoice === 'replaced_now' && newExpiry) {
+            patch.expiry_date = newExpiry;
+            patch.last_replaced_date = l.obs.replacement_date ?? today;
+            patch.last_replaced_by = ctx.userId;
+            patch.last_verified_date = nowIso;
+            patch.last_verified_by = ctx.userId;
+            patch.remarks = l.remarks ?? null;
+            patch.expiry_status = getExpiryReminderStatus(true, newExpiry, l.spec.expiry_warning_days, null, now) ?? 'Valid';
+            patch.replacement_photo_url = l.obs.replacement_photo_url ?? null;
+            patch.replacement_photo_cloudinary_public_id = l.obs.replacement_photo_cloudinary_public_id ?? null;
+            const { error: auditErr } = await admin.from('expiry_audit_logs').insert({
+              box_id: body.box_id,
+              box_item_id: l.ev.box_item_id,
+              old_expiry_date: oldExpiry,
+              new_expiry_date: newExpiry,
+              changed_by: ctx.userId,
+              reason: l.remarks,
+              source: 'replacement',
+              replacement_photo_url: l.obs.replacement_photo_url ?? null,
+              replacement_photo_cloudinary_public_id: l.obs.replacement_photo_cloudinary_public_id ?? null,
+            });
+            if (auditErr) throw auditErr;
+          }
+        }
+
         if (Object.keys(patch).length > 0) {
-          await admin.from('box_items').update(patch).eq('id', l.ev.box_item_id);
+          const { error: patchErr } = await admin.from('box_items').update(patch).eq('id', l.ev.box_item_id);
+          if (patchErr) throw patchErr;
         }
       }
 

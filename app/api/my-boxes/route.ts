@@ -58,6 +58,36 @@ export async function GET(): Promise<Response> {
 
     const boxIds = boxes.map((b) => b.id);
 
+    const today = now.toISOString().slice(0, 10);
+    const in30 = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+    const in60 = new Date(now.getTime() + 60 * 86_400_000).toISOString().slice(0, 10);
+    const { data: expiryData } = await admin
+      .from('box_items')
+      .select('box_id, expiry_date, expiry_status')
+      .in('box_id', boxIds)
+      .eq('is_active', true)
+      .eq('has_expiry', true);
+
+    const expiryByBox = new Map<
+      string,
+      { expired: number; expiring_30: number; expiring_60: number; missing_date: number; mismatch: number }
+    >();
+    for (const r of (expiryData ?? []) as { box_id: string; expiry_date: string | null; expiry_status: string | null }[]) {
+      const s = expiryByBox.get(r.box_id) ?? {
+        expired: 0,
+        expiring_30: 0,
+        expiring_60: 0,
+        missing_date: 0,
+        mismatch: 0,
+      };
+      if (r.expiry_status === 'Expiry label mismatch') s.mismatch += 1;
+      if (!r.expiry_date || r.expiry_status === 'No expiry date recorded') s.missing_date += 1;
+      else if (r.expiry_date < today) s.expired += 1;
+      else if (r.expiry_date <= in30) s.expiring_30 += 1;
+      else if (r.expiry_date <= in60) s.expiring_60 += 1;
+      expiryByBox.set(r.box_id, s);
+    }
+
     // Latest inspection date per box (one pass over desc-ordered rows).
     const { data: inspData } = await admin
       .from('inspections')
@@ -110,6 +140,13 @@ export async function GET(): Promise<Response> {
         next_due_date: due.next_due_date,
         due_status: due.due_status,
         days_overdue: due.days_overdue,
+        expiry_summary: expiryByBox.get(b.id) ?? {
+          expired: 0,
+          expiring_30: 0,
+          expiring_60: 0,
+          missing_date: 0,
+          mismatch: 0,
+        },
         assigned_inspectors: inspectorsByBox.get(b.id) ?? [],
       };
     });

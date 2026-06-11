@@ -4,14 +4,18 @@
 // what guarantees "start an inspection in weak signal and don't lose data":
 // every change is saved locally; a failed submit keeps the draft for retry.
 
-import type { PresentStatus, VolumeLevel } from '@/lib/logic/types.ts';
+import type { ExpiryValidationStatus, PresentStatus, VolumeLevel } from '@/lib/logic/types.ts';
 
 export interface DraftObservation {
   observed_quantity?: number | null;
   observed_volume_level?: VolumeLevel | null;
   observed_present_status?: PresentStatus | null;
   expiry_date?: string | null;
-  expiry_quick_option?: 'no_label' | 'expired' | null;
+  expiry_validation_status?: ExpiryValidationStatus | null;
+  replacement_date?: string | null;
+  replacement_photo_url?: string | null;
+  replacement_photo_cloudinary_public_id?: string | null;
+  expiry_quick_option?: 'no_label' | 'expired' | null; // legacy draft key
   remarks?: string | null;
 }
 

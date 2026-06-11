@@ -204,10 +204,10 @@ test('validateObservation requires the right field per measurement type', () => 
   );
 });
 
-test('validateObservation requires a valid expiry date when has_expiry', () => {
+test('validateObservation requires expiry validation when has_expiry', () => {
   assert.match(
     validateObservation(spec({ has_expiry: true }), { observed_quantity: 1 }) ?? '',
-    /expiry date is required/,
+    /expiry validation is required/,
   );
   assert.match(
     validateObservation(spec({ has_expiry: true }), { observed_quantity: 1, expiry_date: '2026-13-40' }) ?? '',
@@ -215,6 +215,63 @@ test('validateObservation requires a valid expiry date when has_expiry', () => {
   );
   assert.equal(
     validateObservation(spec({ has_expiry: true }), { observed_quantity: 1, expiry_date: '2026-12-01' }),
+    null,
+  );
+});
+
+test('monthly expiry validation can use the stored box item date', () => {
+  const s = spec({ has_expiry: true, current_expiry_date: '2026-12-01' });
+  assert.equal(
+    validateObservation(s, { observed_quantity: 1, expiry_validation_status: 'matches_label' }),
+    null,
+  );
+  const r = evalOne(s, { observed_quantity: 30, expiry_validation_status: 'matches_label' });
+  assert.equal(r.expiry_date, '2026-12-01');
+  assert.equal(r.item_status, 'OK');
+});
+
+test('expiry mismatch requires a corrected date and remarks', () => {
+  const s = spec({ has_expiry: true, current_expiry_date: '2026-12-01' });
+  assert.match(
+    validateObservation(s, { observed_quantity: 1, expiry_validation_status: 'different_date', expiry_date: '2026-11-01' }) ?? '',
+    /remarks are required/,
+  );
+  assert.equal(
+    validateObservation(s, {
+      observed_quantity: 1,
+      expiry_validation_status: 'different_date',
+      expiry_date: '2026-11-01',
+      remarks: 'Physical label is different.',
+    }),
+    null,
+  );
+});
+
+test('no expiry label is an issue without replacing the stored date', () => {
+  const r = evalOne(spec({ has_expiry: true, current_expiry_date: '2026-12-01' }), {
+    observed_quantity: 30,
+    expiry_validation_status: 'no_label',
+    remarks: 'Label missing.',
+  });
+  assert.equal(r.expiry_date, '2026-12-01');
+  assert.equal(r.item_status, 'Expiry Label Mismatch');
+  assert.equal(r.expiry_label_mismatch, true);
+  assert.equal(r.topup_required, true);
+});
+
+test('replaced item requires replacement date and new expiry date', () => {
+  const s = spec({ has_expiry: true, current_expiry_date: '2026-01-01' });
+  assert.match(
+    validateObservation(s, { observed_quantity: 1, expiry_validation_status: 'replaced_now', expiry_date: '2027-01-01' }) ?? '',
+    /replacement date is required/,
+  );
+  assert.equal(
+    validateObservation(s, {
+      observed_quantity: 1,
+      expiry_validation_status: 'replaced_now',
+      expiry_date: '2027-01-01',
+      replacement_date: '2026-06-10',
+    }),
     null,
   );
 });

@@ -16,6 +16,8 @@ export type ItemStatus =
   | 'Missing'
   | 'Expired'
   | 'Expiring Soon'
+  | 'No Expiry Date'
+  | 'Expiry Label Mismatch'
   | 'Damaged'
   | 'Not Applicable';
 
@@ -31,6 +33,23 @@ export type RestockThresholdType =
   | 'any_missing'
   | 'expired_only';
 
+export type ExpiryValidationStatus =
+  | 'matches_label'
+  | 'different_date'
+  | 'no_label'
+  | 'expired'
+  | 'replaced_now'
+  | 'missing_not_replaced';
+
+export type ExpiryReminderStatus =
+  | 'Valid'
+  | 'Expiring soon'
+  | 'Expired'
+  | 'No expiry date recorded'
+  | 'Expiry label mismatch';
+
+export type ExpiryAuditSource = 'replacement' | 'inspection_correction' | 'admin_correction';
+
 /** The expected setup of one item in a box (from box_items joined with template). */
 export interface BoxItemSpec {
   box_item_id: string;
@@ -38,6 +57,7 @@ export interface BoxItemSpec {
   measurement_type: MeasurementType;
   required_quantity: number | null;
   has_expiry: boolean;
+  current_expiry_date?: string | null;
   expiry_warning_days: number | null;
   is_critical: boolean;
   restock_threshold_type: RestockThresholdType | null;
@@ -50,6 +70,10 @@ export interface Observation {
   observed_volume_level?: VolumeLevel | null;
   observed_present_status?: PresentStatus | null;
   expiry_date?: string | null; // 'YYYY-MM-DD'
+  expiry_validation_status?: ExpiryValidationStatus | null;
+  replacement_date?: string | null; // 'YYYY-MM-DD'
+  replacement_photo_url?: string | null;
+  replacement_photo_cloudinary_public_id?: string | null;
   remarks?: string | null;
 }
 
@@ -63,6 +87,10 @@ export interface EvaluatedItem {
   observed_volume_level: VolumeLevel | null;
   observed_present_status: PresentStatus | null;
   expiry_date: string | null;
+  system_expiry_date: string | null;
+  expiry_validation_status: ExpiryValidationStatus | null;
+  expiry_label_mismatch: boolean;
+  no_expiry_date_recorded: boolean;
   item_status: ItemStatus;
   is_below_half: boolean;
   is_expired: boolean;

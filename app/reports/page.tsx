@@ -225,6 +225,9 @@ function Dashboard({ d }: { d: ReportsResponse['dashboard'] }) {
     ['Needing top-up', d.boxes_needing_topup, d.boxes_needing_topup > 0 ? 'warn' : 'ok'],
     ['With expired items', d.boxes_with_expired_items, d.boxes_with_expired_items > 0 ? 'bad' : 'ok'],
     ['Expiring soon', d.boxes_with_expiring_soon_items, d.boxes_with_expiring_soon_items > 0 ? 'warn' : 'ok'],
+    ['Within 30 days', d.items_expiring_within_30_days, d.items_expiring_within_30_days > 0 ? 'warn' : 'ok'],
+    ['Missing expiry date', d.boxes_with_missing_expiry_dates, d.boxes_with_missing_expiry_dates > 0 ? 'bad' : 'ok'],
+    ['Label mismatch', d.boxes_with_expiry_label_mismatch, d.boxes_with_expiry_label_mismatch > 0 ? 'warn' : 'ok'],
     ['Open top-ups', d.open_topup_requests, d.open_topup_requests > 0 ? 'warn' : 'ok'],
     ['Usage this month', d.usage_logs_this_month, 'neutral'],
   ];
@@ -313,9 +316,39 @@ function InspectionsReport({
 
 function IssuesReport({ data }: { data: ReportsResponse }) {
   const rows = data.inspection_items.filter((i) => i.topup_required || i.is_expired || i.expires_soon);
-  if (rows.length === 0) return <Empty label="No item issues match these filters." />;
+  const expiryRows = data.expiry_items;
+  if (rows.length === 0 && expiryRows.length === 0) return <Empty label="No item issues match these filters." />;
   return (
-    <section>
+    <section className="space-y-4">
+      {expiryRows.length > 0 && (
+        <div>
+          <h2 className="mb-2 font-semibold">Current expiry reminders</h2>
+          <div className="space-y-2 md:hidden">
+            {expiryRows.map((r) => (
+              <div key={r.id} className="card p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-medium">{r.item_name}</p>
+                  <Badge tone={r.expiry_status === 'Expired' || r.expiry_status === 'No expiry date recorded' ? 'bad' : 'warn'}>
+                    {r.expiry_status}
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-500">Expiry: {formatDate(r.expiry_date)}</p>
+              </div>
+            ))}
+          </div>
+          <Table
+            head={['Item', 'Expiry', 'Status', 'Last verified']}
+            rows={expiryRows.map((r) => [
+              r.item_name,
+              formatDate(r.expiry_date),
+              <Badge key="s" tone={r.expiry_status === 'Expired' || r.expiry_status === 'No expiry date recorded' ? 'bad' : 'warn'}>
+                {r.expiry_status}
+              </Badge>,
+              formatDate(r.last_verified_date),
+            ])}
+          />
+        </div>
+      )}
       <div className="space-y-2 md:hidden">
         {rows.map((r) => (
           <div key={r.id} className="card flex items-center justify-between p-3">

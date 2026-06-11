@@ -8,6 +8,7 @@
 import { requireActive, requireBoxAccess } from '@/lib/auth';
 import { jsonOk, notFound, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getExpiryReminderStatus } from '@/lib/logic/inspection.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,9 @@ interface EffectiveItem {
   unit: string | null;
   has_expiry: boolean;
   expiry_date: string | null;
+  expiry_status: string | null;
+  last_verified_date: string | null;
+  last_replaced_date: string | null;
   current_quantity: number | null;
   current_volume_level: string | null;
   current_present_status: string | null;
@@ -73,12 +77,13 @@ export async function GET(
     const { data: itemsData } = await admin
       .from('box_items_effective')
       .select(
-        'id, item_code, item_name, measurement_type, required_quantity, unit, has_expiry, expiry_date, current_quantity, current_volume_level, current_present_status, effective_item_photo_url, display_order, is_critical, expiry_warning_days',
+        'id, item_code, item_name, measurement_type, required_quantity, unit, has_expiry, expiry_date, expiry_status, last_verified_date, last_replaced_date, current_quantity, current_volume_level, current_present_status, effective_item_photo_url, display_order, is_critical, expiry_warning_days',
       )
       .eq('box_id', box_id)
       .eq('is_active', true)
       .order('display_order', { ascending: true });
 
+    const now = new Date();
     const items = ((itemsData ?? []) as EffectiveItem[]).map((it) => ({
       box_item_id: it.id,
       item_code: it.item_code,
@@ -94,6 +99,15 @@ export async function GET(
       current_volume_level: it.current_volume_level,
       current_present_status: it.current_present_status,
       current_expiry_date: it.expiry_date,
+      expiry_status: getExpiryReminderStatus(
+        it.has_expiry,
+        it.expiry_date,
+        it.expiry_warning_days,
+        it.expiry_status,
+        now,
+      ),
+      last_verified_date: it.last_verified_date,
+      last_replaced_date: it.last_replaced_date,
       // reference photo: box override -> template default -> null (UI placeholder)
       item_photo_url: it.effective_item_photo_url,
       display_order: it.display_order,

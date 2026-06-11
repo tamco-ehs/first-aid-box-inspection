@@ -3,6 +3,8 @@
 
 import type {
   DueStatus,
+  ExpiryReminderStatus,
+  ExpiryValidationStatus,
   ItemStatus,
   MeasurementType,
   OverallStatus,
@@ -14,6 +16,8 @@ import type {
 
 export type {
   DueStatus,
+  ExpiryReminderStatus,
+  ExpiryValidationStatus,
   ItemStatus,
   MeasurementType,
   OverallStatus,
@@ -49,6 +53,13 @@ export interface MyBox {
   next_due_date: string;
   due_status: DueStatus;
   days_overdue: number;
+  expiry_summary: {
+    expired: number;
+    expiring_30: number;
+    expiring_60: number;
+    missing_date: number;
+    mismatch: number;
+  };
   assigned_inspectors: AssignedInspector[];
 }
 
@@ -72,6 +83,9 @@ export interface TemplateItem {
   current_volume_level: VolumeLevel | null;
   current_present_status: PresentStatus | null;
   current_expiry_date: string | null;
+  expiry_status: ExpiryReminderStatus | null;
+  last_verified_date: string | null;
+  last_replaced_date: string | null;
   item_photo_url: string | null;
   display_order: number | null;
 }
@@ -112,6 +126,8 @@ export interface InspectionResult {
     damaged: number;
     expired: number;
     expiring_soon: number;
+    no_expiry_date_recorded: number;
+    expiry_label_mismatch: number;
     topup_required: number;
   };
   topups_created: number;
@@ -134,6 +150,9 @@ export interface DashboardSummary {
   boxes_needing_topup: number;
   boxes_with_expired_items: number;
   boxes_with_expiring_soon_items: number;
+  boxes_with_missing_expiry_dates: number;
+  boxes_with_expiry_label_mismatch: number;
+  items_expiring_within_30_days: number;
   open_topup_requests: number;
   usage_logs_this_month: number;
 }
@@ -158,6 +177,10 @@ export interface ReportInspectionItem {
   observed_volume_level: VolumeLevel | null;
   observed_present_status: PresentStatus | null;
   expiry_date: string | null;
+  system_expiry_date: string | null;
+  expiry_validation_status: ExpiryValidationStatus | null;
+  expiry_label_mismatch: boolean;
+  no_expiry_date_recorded: boolean;
   item_status: ItemStatus | null;
   is_expired: boolean;
   expires_soon: boolean;
@@ -187,11 +210,22 @@ export interface ReportUsage {
   created_at: string;
 }
 
+export interface ReportExpiryItem {
+  id: string;
+  box_id: string;
+  item_name: string;
+  expiry_date: string | null;
+  expiry_status: ExpiryReminderStatus;
+  last_verified_date: string | null;
+  last_replaced_date: string | null;
+}
+
 export interface ReportsResponse {
   filters: Record<string, string>;
   dashboard: DashboardSummary;
   inspections: ReportInspection[];
   inspection_items: ReportInspectionItem[];
+  expiry_items: ReportExpiryItem[];
   topup_requests: ReportTopup[];
   usage_logs: ReportUsage[];
 }
