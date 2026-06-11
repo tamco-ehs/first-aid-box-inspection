@@ -34,18 +34,19 @@ function Admin({ me }: { me: Me }) {
         title="Admin"
         subtitle={me.full_name}
         right={
-          <a href="/reports" className="btn btn-ghost btn-md text-slate-600">
+          <a href="/reports" className="btn btn-ghost btn-md text-slate-600" data-tour="admin-reports-link">
             Dashboard
           </a>
         }
       />
       <main className="mx-auto max-w-5xl space-y-4 p-4">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" data-tour="admin-tabs">
           {TABS.map(([key, label]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
               className={`btn btn-md ${tab === key ? 'btn-primary' : 'btn-secondary'}`}
+              data-tour={key === 'topups' ? 'admin-topups-tab' : undefined}
             >
               {label}
             </button>

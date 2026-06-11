@@ -6,6 +6,7 @@ import { api, ApiClientError } from '@/lib/client/api.ts';
 import { setIntendedPath } from '@/lib/client/intent.ts';
 import type { Me, Role } from '@/lib/client/types.ts';
 import { FullScreenLoader } from '@/components/Spinner';
+import { GuidedTour } from '@/components/GuidedTour';
 
 // Client-side guard. The real enforcement is server-side in every API route;
 // this only avoids rendering a page for someone who will be denied anyway, and
@@ -51,7 +52,12 @@ export function RequireAuth({
 
   if (state === 'loading') return <FullScreenLoader />;
   if (state === 'denied' || !me) return <AccessBlocked />;
-  return <>{children(me)}</>;
+  return (
+    <>
+      {children(me)}
+      <GuidedTour me={me} />
+    </>
+  );
 }
 
 export function AccessBlocked({

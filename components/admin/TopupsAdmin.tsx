@@ -132,7 +132,7 @@ export function TopupsAdmin() {
           const issueAllBusy = busyKey === `Completed:${openItems.map((t) => t.id).join(',')}`;
 
           return (
-            <section key={boxId} className="card overflow-hidden">
+            <section key={boxId} className="card overflow-hidden" data-tour="topup-box-group">
               <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50 p-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">

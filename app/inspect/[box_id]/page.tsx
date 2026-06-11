@@ -448,7 +448,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
             </dl>
             <p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">{guidanceNote}</p>
           </section>
-          <button type="button" onClick={startInspection} className="btn btn-lg btn-primary w-full">
+          <button type="button" onClick={startInspection} className="btn btn-lg btn-primary w-full" data-tour="inspect-start">
             Start Inspection
           </button>
         </main>
@@ -463,7 +463,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
         <main className="mx-auto max-w-md space-y-3 p-4 pb-28">
           {draftBanner}
           {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
-          <section className="card p-4">
+          <section className="card p-4" data-tour="review-summary">
             <h1 className="text-xl font-bold">Inspection summary</h1>
             <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
               <SummaryTile label="Total items" value={tpl.items.length} />
@@ -497,7 +497,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
             </button>
           </section>
 
-          <section className="card p-4">
+          <section className="card p-4" data-tour="review-photo">
             <h2 className="mb-2 font-semibold">Live box photo</h2>
             <PhotoCapture
               initialUrl={photo?.url ?? null}
@@ -517,7 +517,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
 
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
           <div className="mx-auto max-w-md">
-            <button type="button" onClick={submit} disabled={submitting} className="btn btn-lg btn-primary w-full">
+            <button type="button" onClick={submit} disabled={submitting} className="btn btn-lg btn-primary w-full" data-tour="submit-inspection">
               {submitting ? (
                 <>
                   <Spinner className="h-5 w-5" /> Submitting...
@@ -554,7 +554,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
         {draftBanner}
         {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
 
-        <section className="card flex items-center gap-3 px-3 py-2">
+        <section className="card flex items-center gap-3 px-3 py-2" data-tour="inspect-progress">
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-2">
               <p className="text-sm font-semibold">
@@ -580,6 +580,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
         <div
           key={currentItem.box_item_id}
           className={`inspection-step ${stepDirection === 'backward' ? 'inspection-step-backward' : 'inspection-step-forward'}`}
+          data-tour="inspect-current-item"
         >
           <ChecklistCard
             item={currentItem}

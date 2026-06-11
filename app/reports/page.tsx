@@ -223,6 +223,7 @@ function Reports({ me }: { me: Me }) {
               key={key}
               onClick={() => setTab(key)}
               className={`btn btn-md ${tab === key ? 'btn-primary' : 'btn-secondary'}`}
+              data-tour={key === 'topups' ? 'reports-action-tab' : undefined}
             >
               {label}
             </button>
@@ -366,7 +367,7 @@ function Dashboard({
 
   return (
     <div className="space-y-3">
-      <div className="card border-brand/20 bg-white p-4">
+      <div className="card border-brand/20 bg-white p-4" data-tour="dashboard-decision">
         <p className="text-xs font-semibold uppercase text-brand">Decision view</p>
         <h2 className="mt-1 text-lg font-bold">What needs action today</h2>
         <p className="mt-1 text-sm text-slate-600">
@@ -455,6 +456,7 @@ function InspectionsReport({
               download
               className="btn btn-md btn-secondary mt-3 w-full"
               aria-label={`Download audit PDF for inspection ${r.id}`}
+              data-tour="inspection-pdf"
             >
               Download audit PDF
             </a>
@@ -469,7 +471,7 @@ function InspectionsReport({
           r.boxes?.area ?? '-',
           r.inspector_name,
           <OverallBadge key="s" status={r.overall_status} />,
-          <a key="pdf" href={inspectionPdfHref(r.id)} download className="btn btn-md btn-secondary">
+          <a key="pdf" href={inspectionPdfHref(r.id)} download className="btn btn-md btn-secondary" data-tour="inspection-pdf">
             PDF
           </a>,
         ])}
@@ -713,7 +715,7 @@ function TopupsReport({
           const issueAllIds = activeInBox.map((i) => i.id);
           const issueAllBusy = busyKey === `Completed:${issueAllIds.join(',')}`;
           return (
-            <div key={boxId} className="card overflow-hidden">
+            <div key={boxId} className="card overflow-hidden" data-tour="topup-box-group">
               <div className="flex flex-col gap-2 border-b border-slate-100 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h3 className="text-base font-bold">{boxLabel(box, boxId)}</h3>

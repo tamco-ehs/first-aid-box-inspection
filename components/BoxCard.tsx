@@ -11,7 +11,7 @@ export function BoxCard({ box }: { box: MyBox }) {
     box.expiry_summary.mismatch;
 
   return (
-    <div className="card p-4">
+    <div className="card p-4" data-tour="box-card">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold text-slate-500">{box.box_code}</p>
@@ -48,7 +48,7 @@ export function BoxCard({ box }: { box: MyBox }) {
         </div>
       )}
 
-      <a href={`/inspect/${box.box_id}`} className="btn btn-lg btn-primary mt-4 w-full">
+      <a href={`/inspect/${box.box_id}`} className="btn btn-lg btn-primary mt-4 w-full" data-tour="inspect-link">
         Start inspection
       </a>
     </div>
