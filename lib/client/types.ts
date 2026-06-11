@@ -182,8 +182,11 @@ export interface ReportInspection {
 export interface ReportInspectionItem {
   id: string;
   inspection_id: string;
+  box_id: string | null;
+  boxes: { box_code: string; box_name: string; area: string | null } | null;
   item_name: string;
   required_quantity: number | null;
+  unit: string | null;
   observed_quantity: number | null;
   observed_volume_level: VolumeLevel | null;
   observed_present_status: PresentStatus | null;

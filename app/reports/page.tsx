@@ -131,7 +131,7 @@ function Reports({ me }: { me: Me }) {
             <ul className="mt-1 space-y-1 text-sm text-amber-800">
               {insights.map((i) => (
                 <li key={i.name}>
-                  <strong className="capitalize">{i.name}</strong> — taken {i.usageCount}× and flagged
+                  <strong className="capitalize">{i.name}</strong> was taken {i.usageCount} times and flagged
                   short in {i.shortageCount} inspection{i.shortageCount === 1 ? '' : 's'}.
                 </li>
               ))}
@@ -239,7 +239,7 @@ function Reports({ me }: { me: Me }) {
         {data && !loading && (
           <>
             {tab === 'inspections' && <InspectionsReport data={data} boxById={boxById} />}
-            {tab === 'issues' && <IssuesReport data={data} issueType={issueType} />}
+            {tab === 'issues' && <IssuesReport data={data} issueType={issueType} boxById={boxById} />}
             {tab === 'topups' && (
               <TopupsReport data={data} boxById={boxById} isAdmin={me.role === 'admin'} onChanged={load} />
             )}
@@ -260,32 +260,92 @@ function Dashboard({
   d: ReportsResponse['dashboard'];
   onJump: (tab: Tab, issueType?: string) => void;
 }) {
-  type Card = { label: string; value: number; tone: 'ok' | 'warn' | 'bad' | 'neutral'; jump?: () => void };
+  type Card = {
+    label: string;
+    value: number;
+    tone: 'ok' | 'warn' | 'bad' | 'neutral';
+    hint: string;
+    jump?: () => void;
+  };
   const sev = (n: number, t: 'warn' | 'bad'): 'ok' | 'warn' | 'bad' => (n > 0 ? t : 'ok');
 
   // Decision cards: "what needs action today", each filtering the queue below.
   const decisionCards: Card[] = [
-    { label: 'Critical now', value: d.critical_now, tone: sev(d.critical_now, 'bad'), jump: () => onJump('issues', 'expired') },
-    { label: 'Top-up required', value: d.open_topup_requests, tone: sev(d.open_topup_requests, 'warn'), jump: () => onJump('topups') },
-    { label: 'Replacement', value: d.items_expired, tone: sev(d.items_expired, 'bad'), jump: () => onJump('issues', 'expired') },
-    { label: 'Expiring ≤30d', value: d.items_expiring_within_30_days, tone: sev(d.items_expiring_within_30_days, 'warn'), jump: () => onJump('issues', 'expiring_soon') },
-    { label: 'Expiry verification', value: d.items_expiry_verification, tone: sev(d.items_expiry_verification, 'warn'), jump: () => onJump('issues') },
-    { label: 'Baseline missing', value: d.items_baseline_missing, tone: sev(d.items_baseline_missing, 'warn'), jump: () => onJump('issues') },
-    { label: 'Overdue inspections', value: d.overdue_boxes, tone: sev(d.overdue_boxes, 'bad'), jump: () => onJump('inspections') },
-    { label: 'Admin review (photos)', value: d.items_missing_photo, tone: d.items_missing_photo > 0 ? 'warn' : 'neutral' },
+    {
+      label: 'Critical now',
+      value: d.critical_now,
+      tone: sev(d.critical_now, 'bad'),
+      hint: 'Expired critical items',
+      jump: () => onJump('issues', 'expired'),
+    },
+    {
+      label: 'Top-up required',
+      value: d.open_topup_requests,
+      tone: sev(d.open_topup_requests, 'warn'),
+      hint: 'Open action queue',
+      jump: () => onJump('topups'),
+    },
+    {
+      label: 'Replacement',
+      value: d.items_expired,
+      tone: sev(d.items_expired, 'bad'),
+      hint: 'Expired inventory',
+      jump: () => onJump('issues', 'expired'),
+    },
+    {
+      label: 'Expiring <=30d',
+      value: d.items_expiring_within_30_days,
+      tone: sev(d.items_expiring_within_30_days, 'warn'),
+      hint: 'Plan before month end',
+      jump: () => onJump('issues', 'expiring_soon'),
+    },
+    {
+      label: 'Expiry verification',
+      value: d.items_expiry_verification,
+      tone: sev(d.items_expiry_verification, 'warn'),
+      hint: 'Label mismatch',
+      jump: () => onJump('issues'),
+    },
+    {
+      label: 'Baseline missing',
+      value: d.items_baseline_missing,
+      tone: sev(d.items_baseline_missing, 'warn'),
+      hint: 'No expiry date saved',
+      jump: () => onJump('issues'),
+    },
+    {
+      label: 'Overdue inspections',
+      value: d.overdue_boxes,
+      tone: sev(d.overdue_boxes, 'bad'),
+      hint: 'Boxes past due',
+      jump: () => onJump('inspections'),
+    },
+    {
+      label: 'Admin review',
+      value: d.items_missing_photo,
+      tone: d.items_missing_photo > 0 ? 'warn' : 'neutral',
+      hint: 'Items missing photos',
+    },
   ];
   const contextCards: Card[] = [
-    { label: 'Total boxes', value: d.total_boxes, tone: 'neutral' },
-    { label: 'Inspected this month', value: d.boxes_inspected_this_month, tone: 'ok' },
-    { label: 'Usage this month', value: d.usage_logs_this_month, tone: 'neutral' },
+    { label: 'Total boxes', value: d.total_boxes, tone: 'neutral', hint: 'Active coverage' },
+    { label: 'Inspected this month', value: d.boxes_inspected_this_month, tone: 'ok', hint: 'Completed rounds' },
+    { label: 'Usage this month', value: d.usage_logs_this_month, tone: 'neutral', hint: 'Medicine taken' },
   ];
 
   const renderCard = (c: Card) => {
+    const badge =
+      c.tone === 'bad' ? 'Act now' : c.tone === 'warn' ? 'Plan' : c.tone === 'ok' ? 'Clear' : 'Info';
     const inner = (
       <>
-        <p className="text-2xl font-bold tabular-nums">{c.value}</p>
-        <p className="text-xs text-slate-500">{c.label}</p>
-        <span className={`badge mt-1 ${toneToClass(c.tone)}`}>&nbsp;</span>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-2xl font-bold tabular-nums">{c.value}</p>
+            <p className="text-xs font-semibold text-slate-700">{c.label}</p>
+          </div>
+          <span className={`badge ${toneToClass(c.tone)}`}>{badge}</span>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">{c.hint}</p>
       </>
     );
     return c.jump ? (
@@ -293,7 +353,7 @@ function Dashboard({
         key={c.label}
         type="button"
         onClick={c.jump}
-        className="card p-3 text-left transition hover:border-slate-300 hover:shadow"
+        className="card p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow"
       >
         {inner}
       </button>
@@ -306,11 +366,20 @@ function Dashboard({
 
   return (
     <div className="space-y-3">
-      <div>
-        <p className="mb-2 text-sm font-semibold text-slate-700">What needs action today</p>
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">{decisionCards.map(renderCard)}</section>
+      <div className="card border-brand/20 bg-white p-4">
+        <p className="text-xs font-semibold uppercase text-brand">Decision view</p>
+        <h2 className="mt-1 text-lg font-bold">What needs action today</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Start with red cards, then work through the amber planning items.
+        </p>
+        <section className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {decisionCards.map(renderCard)}
+        </section>
       </div>
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">{contextCards.map(renderCard)}</section>
+      <div>
+        <p className="mb-2 text-sm font-semibold text-slate-700">Context</p>
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">{contextCards.map(renderCard)}</section>
+      </div>
     </div>
   );
 }
@@ -325,7 +394,7 @@ function ExportBar({ onExport }: { onExport: () => void }) {
   return (
     <div className="mb-2 flex justify-end">
       <button onClick={onExport} className="btn btn-md btn-secondary">
-        ⬇ Export CSV
+        Export CSV
       </button>
     </div>
   );
@@ -339,6 +408,11 @@ function InspectionsReport({
   boxById: Map<string, BoxLite>;
 }) {
   const rows = data.inspections;
+  const inspectionStatus = {
+    restock: rows.filter((r) => r.overall_status === 'Needs Restock').length,
+    fail: rows.filter((r) => r.overall_status === 'Fail').length,
+    boxes: new Set(rows.map((r) => r.box_id)).size,
+  };
   function exportCsv() {
     const csv = toCsv(rows, [
       { key: 'created_at', label: 'Date', value: (r) => formatDateTime(r.created_at) },
@@ -355,18 +429,26 @@ function InspectionsReport({
 
   if (rows.length === 0) return <Empty label="No inspections match these filters." />;
   return (
-    <section>
+    <section className="space-y-4">
       <ExportBar onExport={exportCsv} />
+      <ReportSummary
+        items={[
+          { label: 'Inspections', value: rows.length, tone: 'neutral' },
+          { label: 'Boxes covered', value: inspectionStatus.boxes, tone: 'neutral' },
+          { label: 'Need restock', value: inspectionStatus.restock, tone: inspectionStatus.restock > 0 ? 'warn' : 'ok' },
+          { label: 'Failed', value: inspectionStatus.fail, tone: inspectionStatus.fail > 0 ? 'bad' : 'ok' },
+        ]}
+      />
       <div className="space-y-2 md:hidden">
         {rows.map((r) => (
           <div key={r.id} className="card p-3">
             <div className="flex items-center justify-between">
-              <span className="font-semibold">{r.boxes?.box_code ?? '—'}</span>
+              <span className="font-semibold">{r.boxes?.box_code ?? '-'}</span>
               <OverallBadge status={r.overall_status} />
             </div>
             <p className="text-sm">{r.boxes?.box_name}</p>
             <p className="text-xs text-slate-500">
-              {formatDateTime(r.created_at)} · {r.inspector_name}
+              {formatDateTime(r.created_at)} - {r.inspector_name}
             </p>
           </div>
         ))}
@@ -375,8 +457,8 @@ function InspectionsReport({
         head={['Date', 'Box', 'Area', 'Inspector', 'Status']}
         rows={rows.map((r) => [
           formatDateTime(r.created_at),
-          r.boxes?.box_code ?? '—',
-          r.boxes?.area ?? '—',
+          r.boxes?.box_code ?? '-',
+          r.boxes?.area ?? '-',
           r.inspector_name,
           <OverallBadge key="s" status={r.overall_status} />,
         ])}
@@ -385,7 +467,15 @@ function InspectionsReport({
   );
 }
 
-function IssuesReport({ data, issueType }: { data: ReportsResponse; issueType: string }) {
+function IssuesReport({
+  data,
+  issueType,
+  boxById,
+}: {
+  data: ReportsResponse;
+  issueType: string;
+  boxById: Map<string, BoxLite>;
+}) {
   let rows = data.inspection_items.filter((i) => i.topup_required || i.is_expired || i.expires_soon);
   let expiryRows = data.expiry_items;
   if (issueType === 'expired') {
@@ -406,61 +496,92 @@ function IssuesReport({ data, issueType }: { data: ReportsResponse; issueType: s
   } else if (issueType === 'topup') {
     rows = rows.filter((i) => i.topup_required);
   }
+
+  const affectedBoxes = new Set([
+    ...expiryRows.map((r) => r.box_id),
+    ...rows.map((r) => r.box_id).filter(Boolean),
+  ]).size;
+  const replacementCount =
+    expiryRows.filter((r) => r.expiry_status === 'Expired').length + rows.filter((r) => r.is_expired).length;
+  const verificationCount =
+    expiryRows.filter((r) => r.expiry_status === 'No expiry date recorded' || r.expiry_status === 'Expiry label mismatch')
+      .length + rows.filter((r) => r.expiry_label_mismatch || r.no_expiry_date_recorded).length;
+  const topupCount = rows.filter((r) => r.topup_required).length;
+
   if (rows.length === 0 && expiryRows.length === 0) return <Empty label="No item issues match these filters." />;
   return (
     <section className="space-y-4">
+      <ReportSummary
+        items={[
+          { label: 'Boxes affected', value: affectedBoxes, tone: affectedBoxes > 0 ? 'warn' : 'ok' },
+          { label: 'Replace now', value: replacementCount, tone: replacementCount > 0 ? 'bad' : 'ok' },
+          { label: 'Top-up signals', value: topupCount, tone: topupCount > 0 ? 'warn' : 'ok' },
+          { label: 'Verify expiry', value: verificationCount, tone: verificationCount > 0 ? 'warn' : 'ok' },
+        ]}
+      />
+
       {expiryRows.length > 0 && (
-        <div>
-          <h2 className="mb-2 font-semibold">Current expiry reminders</h2>
-          <div className="space-y-2 md:hidden">
-            {expiryRows.map((r) => (
-              <div key={r.id} className="card p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-medium">{r.item_name}</p>
-                  <Badge tone={r.expiry_status === 'Expired' || r.expiry_status === 'No expiry date recorded' ? 'bad' : 'warn'}>
-                    {r.expiry_status}
-                  </Badge>
-                </div>
-                <p className="text-xs text-slate-500">Expiry: {formatDate(r.expiry_date)}</p>
-              </div>
-            ))}
-          </div>
-          <Table
-            head={['Item', 'Expiry', 'Status', 'Last verified']}
-            rows={expiryRows.map((r) => [
-              r.item_name,
-              formatDate(r.expiry_date),
-              <Badge key="s" tone={r.expiry_status === 'Expired' || r.expiry_status === 'No expiry date recorded' ? 'bad' : 'warn'}>
-                {r.expiry_status}
-              </Badge>,
-              formatDate(r.last_verified_date),
-            ])}
+        <div className="space-y-2">
+          <SectionTitle
+            title="Current inventory reminders"
+            subtitle="Live box-level expiry records that need attention, regardless of the last inspection."
           />
+          {expiryRows.map((r) => {
+            const box = boxById.get(r.box_id);
+            return (
+              <div key={r.id} className="card p-4 transition duration-200 hover:border-slate-300 hover:shadow">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500">{boxLabel(box, r.box_id)}</p>
+                    <h3 className="text-base font-bold">{r.item_name}</h3>
+                    <p className="text-sm text-slate-600">
+                      {box?.box_name ?? 'Unknown box'}{box?.area ? ` - ${box.area}` : ''}
+                    </p>
+                  </div>
+                  <Badge tone={expiryTone(r.expiry_status)}>{r.expiry_status}</Badge>
+                </div>
+                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                  <MiniFact label="System expiry" value={formatDate(r.expiry_date)} />
+                  <MiniFact label="Last verified" value={formatDate(r.last_verified_date)} />
+                  <MiniFact label="Recommended action" value={expiryAction(r.expiry_status)} strong />
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
-      <div className="space-y-2 md:hidden">
-        {rows.map((r) => (
-          <div key={r.id} className="card flex items-center justify-between p-3">
-            <div>
-              <p className="font-medium">{r.item_name}</p>
-              <p className="text-xs text-slate-500">
-                {r.observed_quantity ?? r.observed_volume_level ?? r.observed_present_status ?? '—'}
-                {r.expiry_date ? ` · exp ${formatDate(r.expiry_date)}` : ''}
-              </p>
-            </div>
-            {r.item_status && <ItemStatusBadge status={r.item_status} />}
-          </div>
-        ))}
-      </div>
-      <Table
-        head={['Item', 'Observed', 'Expiry', 'Status']}
-        rows={rows.map((r) => [
-          r.item_name,
-          String(r.observed_quantity ?? r.observed_volume_level ?? r.observed_present_status ?? '—'),
-          formatDate(r.expiry_date),
-          r.item_status ? <ItemStatusBadge key="s" status={r.item_status} /> : '—',
-        ])}
-      />
+
+      {rows.length > 0 && (
+        <div className="space-y-2">
+          <SectionTitle
+            title="Issues found during inspection"
+            subtitle="Observed problems from submitted inspections, grouped as clear actions."
+          />
+          {rows.map((r) => {
+            const box = r.box_id ? boxById.get(r.box_id) : undefined;
+            return (
+              <div key={r.id} className="card p-4 transition duration-200 hover:border-slate-300 hover:shadow">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500">
+                      {boxLabel(box, r.box_id ?? undefined)}
+                    </p>
+                    <h3 className="text-base font-bold">{r.item_name}</h3>
+                    <p className="text-sm text-slate-600">{issueActionText(r)}</p>
+                  </div>
+                  {r.item_status && <ItemStatusBadge status={r.item_status} />}
+                </div>
+                <div className="mt-3 grid gap-2 text-sm sm:grid-cols-4">
+                  <MiniFact label="Observed" value={observedText(r)} />
+                  <MiniFact label="System expiry" value={formatDate(r.system_expiry_date ?? r.expiry_date)} />
+                  <MiniFact label="Top-up" value={r.topup_required ? 'Required' : 'Not required'} />
+                  <MiniFact label="Remarks" value={r.remarks || '-'} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
@@ -479,6 +600,10 @@ function TopupsReport({
   const rows = data.topup_requests;
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const sortedRows = useMemo(() => [...rows].sort(compareTopups), [rows]);
+  const activeRows = sortedRows.filter((r) => r.status === 'Open' || r.status === 'In Progress');
+  const completedRows = sortedRows.filter((r) => r.status === 'Completed');
+  const groups = useMemo(() => groupTopupsByBox(sortedRows), [sortedRows]);
 
   async function setStatus(id: string, status: ReportTopup['status']) {
     setBusyId(id);
@@ -518,50 +643,88 @@ function TopupsReport({
   }
   if (rows.length === 0) return <Empty label="No action items match these filters." />;
   return (
-    <section>
+    <section className="space-y-4">
       <ExportBar onExport={exportCsv} />
+      <ReportSummary
+        items={[
+          { label: 'Open actions', value: activeRows.length, tone: activeRows.length > 0 ? 'warn' : 'ok' },
+          {
+            label: 'High priority',
+            value: activeRows.filter((r) => r.priority === 'High').length,
+            tone: activeRows.some((r) => r.priority === 'High') ? 'bad' : 'ok',
+          },
+          {
+            label: 'Boxes to visit',
+            value: new Set(activeRows.map((r) => r.box_id)).size,
+            tone: activeRows.length > 0 ? 'warn' : 'ok',
+          },
+          { label: 'Completed', value: completedRows.length, tone: 'ok' },
+        ]}
+      />
       {actionError && (
         <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{actionError}</p>
       )}
-      <div className="space-y-2">
-        {rows.map((r) => {
-          const open = r.status === 'Open' || r.status === 'In Progress';
+      <SectionTitle
+        title="Restock route"
+        subtitle="Work from top to bottom. High priority and open items appear first."
+      />
+      <div className="space-y-3">
+        {groups.map(([boxId, items]) => {
+          const box = boxById.get(boxId);
+          const activeInBox = items.filter((i) => i.status === 'Open' || i.status === 'In Progress');
           return (
-            <div key={r.id} className="card p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">{r.item_name}</span>
-                {r.priority && <PriorityBadge priority={r.priority} />}
-              </div>
-              {r.reason && <p className="mt-0.5 text-sm text-slate-600">{r.reason}</p>}
-              <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                <span>{boxById.get(r.box_id)?.box_code ?? '—'}</span>
-                <Badge tone={r.status === 'Completed' ? 'ok' : r.status === 'Open' ? 'warn' : 'neutral'}>
-                  {r.status}
-                </Badge>
-                <span>{formatDate(r.requested_at)}</span>
-              </p>
-              {isAdmin && open && (
-                <div className="mt-2 flex gap-2">
-                  {r.status === 'Open' && (
-                    <button
-                      type="button"
-                      disabled={busyId === r.id}
-                      onClick={() => setStatus(r.id, 'In Progress')}
-                      className="btn btn-md btn-secondary"
-                    >
-                      Start
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    disabled={busyId === r.id}
-                    onClick={() => setStatus(r.id, 'Completed')}
-                    className="btn btn-md bg-emerald-600 text-white hover:bg-emerald-700"
-                  >
-                    {busyId === r.id ? <Spinner className="h-4 w-4" /> : 'Mark complete'}
-                  </button>
+            <div key={boxId} className="card overflow-hidden">
+              <div className="flex flex-col gap-2 border-b border-slate-100 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-base font-bold">{boxLabel(box, boxId)}</h3>
+                  <p className="text-sm text-slate-600">
+                    {box?.box_name ?? 'Unknown box'}{box?.area ? ` - ${box.area}` : ''}
+                  </p>
                 </div>
-              )}
+                <Badge tone={activeInBox.length > 0 ? 'warn' : 'ok'}>{activeInBox.length} open</Badge>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {items.map((r) => {
+                  const open = r.status === 'Open' || r.status === 'In Progress';
+                  return (
+                    <div key={r.id} className="p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="font-semibold">{r.item_name}</h4>
+                            {r.priority && <PriorityBadge priority={r.priority} />}
+                            <Badge tone={topupStatusTone(r.status)}>{r.status}</Badge>
+                          </div>
+                          {r.reason && <p className="mt-1 text-sm text-slate-600">{r.reason}</p>}
+                          <p className="mt-1 text-xs text-slate-500">Requested {formatDateTime(r.requested_at)}</p>
+                        </div>
+                        {isAdmin && open && (
+                          <div className="flex shrink-0 gap-2">
+                            {r.status === 'Open' && (
+                              <button
+                                type="button"
+                                disabled={busyId === r.id}
+                                onClick={() => setStatus(r.id, 'In Progress')}
+                                className="btn btn-md btn-secondary"
+                              >
+                                Start
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={busyId === r.id}
+                              onClick={() => setStatus(r.id, 'Completed')}
+                              className="btn btn-md bg-emerald-600 text-white hover:bg-emerald-700"
+                            >
+                              {busyId === r.id ? <Spinner className="h-4 w-4" /> : 'Mark complete'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
@@ -578,6 +741,7 @@ function UsageReport({
   boxById: Map<string, BoxLite>;
 }) {
   const rows = data.usage_logs;
+  const usageStats = useMemo(() => computeUsageStats(rows), [rows]);
   function exportCsv() {
     const csv = toCsv(rows, [
       { key: 'created_at', label: 'Date', value: (r) => formatDateTime(r.created_at) },
@@ -592,14 +756,47 @@ function UsageReport({
   }
   if (rows.length === 0) return <Empty label="No usage logs match these filters." />;
   return (
-    <section>
+    <section className="space-y-4">
       <ExportBar onExport={exportCsv} />
+      <ReportSummary
+        items={[
+          { label: 'Usage records', value: rows.length, tone: 'neutral' },
+          { label: 'Items taken', value: usageStats.totalItems, tone: usageStats.totalItems > 0 ? 'warn' : 'ok' },
+          { label: 'Boxes used', value: usageStats.boxIds.size, tone: 'neutral' },
+          { label: 'Unique items', value: usageStats.topItems.length, tone: 'neutral' },
+        ]}
+      />
+      {usageStats.topItems.length > 0 && (
+        <div className="card p-4">
+          <SectionTitle
+            title="Most used items"
+            subtitle="Use this to spot items that may need higher par levels or earlier top-up."
+          />
+          <div className="mt-3 space-y-3">
+            {usageStats.topItems.slice(0, 6).map((item) => (
+              <div key={item.name}>
+                <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                  <span className="font-semibold capitalize">{item.name}</span>
+                  <span className="text-slate-500">{item.count}</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-brand"
+                    style={{ width: `${Math.max(8, (item.count / usageStats.maxItemCount) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <SectionTitle title="Recent usage" subtitle="The raw log remains available for traceability and CSV export." />
       <div className="space-y-2 md:hidden">
         {rows.map((r) => (
           <div key={r.id} className="card p-3">
             <p className="font-medium">{r.usage_purpose}</p>
             <p className="text-xs text-slate-500">
-              {r.user_name} · {r.department} · {boxById.get(r.box_id)?.box_code ?? '—'} · {formatDate(r.created_at)}
+              {r.user_name} - {r.department} - {boxById.get(r.box_id)?.box_code ?? '-'} - {formatDate(r.created_at)}
             </p>
             {r.items_taken && r.items_taken.length > 0 && (
               <p className="mt-1 text-xs">Items: {r.items_taken.join(', ')}</p>
@@ -611,7 +808,7 @@ function UsageReport({
         head={['Date', 'Box', 'Name', 'Department', 'Purpose', 'Items']}
         rows={rows.map((r) => [
           formatDate(r.created_at),
-          boxById.get(r.box_id)?.box_code ?? '—',
+          boxById.get(r.box_id)?.box_code ?? '-',
           r.user_name,
           r.department,
           r.usage_purpose,
@@ -620,6 +817,146 @@ function UsageReport({
       />
     </section>
   );
+}
+
+/* -------------------------------------------------------------------- Report helpers */
+
+type ReportTone = 'ok' | 'warn' | 'bad' | 'neutral';
+
+function ReportSummary({
+  items,
+}: {
+  items: { label: string; value: number; tone: ReportTone }[];
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {items.map((item) => (
+        <div key={item.label} className="card p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xl font-bold tabular-nums">{item.value}</p>
+            <span className={`h-2.5 w-2.5 rounded-full ${dotToneClass(item.tone)}`} />
+          </div>
+          <p className="mt-1 text-xs font-semibold text-slate-600">{item.label}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div>
+      <h2 className="font-semibold">{title}</h2>
+      {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
+    </div>
+  );
+}
+
+function MiniFact({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="rounded-xl bg-slate-50 px-3 py-2">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className={strong ? 'font-semibold text-slate-900' : 'text-slate-700'}>{value || '-'}</p>
+    </div>
+  );
+}
+
+function dotToneClass(t: ReportTone) {
+  return t === 'ok' ? 'bg-emerald-500' : t === 'warn' ? 'bg-amber-500' : t === 'bad' ? 'bg-red-500' : 'bg-slate-400';
+}
+
+function boxLabel(box: BoxLite | undefined, fallback?: string | null) {
+  return box?.box_code ?? fallback ?? 'Unknown box';
+}
+
+function expiryTone(status: ReportsResponse['expiry_items'][number]['expiry_status']): ReportTone {
+  if (status === 'Expired' || status === 'No expiry date recorded') return 'bad';
+  if (status === 'Expiring soon' || status === 'Expiry label mismatch') return 'warn';
+  return 'ok';
+}
+
+function expiryAction(status: ReportsResponse['expiry_items'][number]['expiry_status']) {
+  if (status === 'Expired') return 'Replace item now';
+  if (status === 'Expiring soon') return 'Plan replacement';
+  if (status === 'Expiry label mismatch') return 'Verify physical label';
+  if (status === 'No expiry date recorded') return 'Record box-level expiry';
+  return 'No action';
+}
+
+function observedText(r: ReportsResponse['inspection_items'][number]) {
+  if (r.observed_quantity !== null && r.observed_quantity !== undefined) {
+    return `${r.observed_quantity}${r.unit ? ` ${r.unit}` : ''}`;
+  }
+  return r.observed_volume_level ?? r.observed_present_status ?? '-';
+}
+
+function issueActionText(r: ReportsResponse['inspection_items'][number]) {
+  if (r.item_status === 'Expired') return 'Replace item and record the new expiry date.';
+  if (r.item_status === 'Low Stock') return 'Top up to the required level.';
+  if (r.item_status === 'Missing') return 'Item is missing from the box.';
+  if (r.item_status === 'Damaged') return 'Replace damaged item.';
+  if (r.item_status === 'Expiring Soon') return 'Plan replacement before expiry.';
+  if (r.item_status === 'No Expiry Date') return 'Record the box-level expiry date.';
+  if (r.item_status === 'Expiry Label Mismatch') return 'Verify and correct the expiry record.';
+  if (r.topup_required) return 'Top-up action required.';
+  return 'Review this inspection issue.';
+}
+
+function topupStatusTone(status: ReportTopup['status']): ReportTone {
+  if (status === 'Completed') return 'ok';
+  if (status === 'Rejected') return 'neutral';
+  if (status === 'Open') return 'warn';
+  return 'neutral';
+}
+
+const priorityOrder: Record<string, number> = { High: 0, Medium: 1, Low: 2 };
+const statusOrder: Record<ReportTopup['status'], number> = {
+  Open: 0,
+  'In Progress': 1,
+  Completed: 2,
+  Rejected: 3,
+};
+
+function compareTopups(a: ReportTopup, b: ReportTopup) {
+  const statusDiff = statusOrder[a.status] - statusOrder[b.status];
+  if (statusDiff !== 0) return statusDiff;
+  const priorityDiff = (priorityOrder[a.priority ?? 'Low'] ?? 3) - (priorityOrder[b.priority ?? 'Low'] ?? 3);
+  if (priorityDiff !== 0) return priorityDiff;
+  return new Date(a.requested_at).getTime() - new Date(b.requested_at).getTime();
+}
+
+function groupTopupsByBox(rows: ReportTopup[]) {
+  const groups = new Map<string, ReportTopup[]>();
+  for (const row of rows) {
+    const list = groups.get(row.box_id) ?? [];
+    list.push(row);
+    groups.set(row.box_id, list);
+  }
+  return [...groups.entries()];
+}
+
+function computeUsageStats(rows: ReportsResponse['usage_logs']) {
+  const itemCounts = new Map<string, number>();
+  const boxIds = new Set<string>();
+  let totalItems = 0;
+  for (const row of rows) {
+    boxIds.add(row.box_id);
+    for (const raw of row.items_taken ?? []) {
+      const name = raw.trim().toLowerCase();
+      if (!name) continue;
+      totalItems++;
+      itemCounts.set(name, (itemCounts.get(name) ?? 0) + 1);
+    }
+  }
+  const topItems = [...itemCounts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  return {
+    boxIds,
+    totalItems,
+    topItems,
+    maxItemCount: Math.max(1, topItems[0]?.count ?? 1),
+  };
 }
 
 /* -------------------------------------------------------------------- Bits */

@@ -203,6 +203,22 @@ export async function GET(req: Request): Promise<Response> {
     if (areaBoxIds) iq = iq.in('box_id', areaBoxIds);
     const { data: inspections } = await iq;
     const inspectionIds = ((inspections ?? []) as { id: string }[]).map((i) => i.id);
+    const inspectionContext = new Map<
+      string,
+      { box_id: string; boxes: { box_code: string; box_name: string; area: string | null } | null }
+    >();
+    type InspectionContextRow = {
+      id: string;
+      box_id: string;
+      boxes:
+        | { box_code: string; box_name: string; area: string | null }
+        | { box_code: string; box_name: string; area: string | null }[]
+        | null;
+    };
+    for (const i of (inspections ?? []) as unknown as InspectionContextRow[]) {
+      const box = Array.isArray(i.boxes) ? (i.boxes[0] ?? null) : i.boxes;
+      inspectionContext.set(i.id, { box_id: i.box_id, boxes: box });
+    }
 
     // --- inspection items (optional issue-type filter) ---
     let inspection_items: unknown[] = [];
@@ -233,7 +249,10 @@ export async function GET(req: Request): Promise<Response> {
           break;
       }
       const { data } = await itq;
-      inspection_items = data ?? [];
+      inspection_items = ((data ?? []) as Record<string, unknown>[]).map((row) => {
+        const ctx = inspectionContext.get(String(row.inspection_id));
+        return { ...row, box_id: ctx?.box_id ?? null, boxes: ctx?.boxes ?? null };
+      });
     }
 
     // --- top-up requests ---
