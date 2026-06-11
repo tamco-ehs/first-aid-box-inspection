@@ -108,11 +108,11 @@ function Reports({ me }: { me: Me }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Jump from a KPI card to the relevant tab + filter, then refetch.
+  // Jump from a KPI card to the relevant tab + filter. No refetch - the data is
+  // already loaded, so this filters client-side and is instant.
   function onJump(nextTab: Tab, nextIssue?: string) {
     setTab(nextTab);
     setIssueType(nextIssue ?? '');
-    load({ issue_type: nextIssue ?? '' });
   }
 
   const insights = useMemo(() => computeInsights(data), [data]);
@@ -239,7 +239,7 @@ function Reports({ me }: { me: Me }) {
         {data && !loading && (
           <>
             {tab === 'inspections' && <InspectionsReport data={data} boxById={boxById} />}
-            {tab === 'issues' && <IssuesReport data={data} />}
+            {tab === 'issues' && <IssuesReport data={data} issueType={issueType} />}
             {tab === 'topups' && (
               <TopupsReport data={data} boxById={boxById} isAdmin={me.role === 'admin'} onChanged={load} />
             )}
@@ -385,9 +385,27 @@ function InspectionsReport({
   );
 }
 
-function IssuesReport({ data }: { data: ReportsResponse }) {
-  const rows = data.inspection_items.filter((i) => i.topup_required || i.is_expired || i.expires_soon);
-  const expiryRows = data.expiry_items;
+function IssuesReport({ data, issueType }: { data: ReportsResponse; issueType: string }) {
+  let rows = data.inspection_items.filter((i) => i.topup_required || i.is_expired || i.expires_soon);
+  let expiryRows = data.expiry_items;
+  if (issueType === 'expired') {
+    rows = rows.filter((i) => i.is_expired);
+    expiryRows = expiryRows.filter((e) => e.expiry_status === 'Expired');
+  } else if (issueType === 'expiring_soon') {
+    rows = rows.filter((i) => i.expires_soon);
+    expiryRows = expiryRows.filter((e) => e.expiry_status === 'Expiring soon');
+  } else if (issueType === 'missing') {
+    rows = rows.filter((i) => i.item_status === 'Missing');
+    expiryRows = [];
+  } else if (issueType === 'low_stock') {
+    rows = rows.filter((i) => i.item_status === 'Low Stock');
+    expiryRows = [];
+  } else if (issueType === 'damaged') {
+    rows = rows.filter((i) => i.item_status === 'Damaged');
+    expiryRows = [];
+  } else if (issueType === 'topup') {
+    rows = rows.filter((i) => i.topup_required);
+  }
   if (rows.length === 0 && expiryRows.length === 0) return <Empty label="No item issues match these filters." />;
   return (
     <section className="space-y-4">

@@ -25,20 +25,92 @@ async function buildDashboard(admin: Admin) {
   const urgent = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
   const soon = new Date(now.getTime() + 60 * 86_400_000).toISOString().slice(0, 10);
 
-  const total_boxes = await headCount(
-    admin.from('boxes').select('id', { count: 'exact', head: true }).eq('is_active', true),
-  );
+  // All of these are independent, so fire them concurrently (one round-trip of
+  // latency instead of ~15 sequential ones - this is what made the dashboard slow).
+  const [
+    total_boxes,
+    boxesRes,
+    inspRes,
+    open_topup_requests,
+    topupBoxesRes,
+    expiredRes,
+    soonRes,
+    urgentRes,
+    missingDateRes,
+    missingStatusRes,
+    mismatchRes,
+    noPhotoRes,
+    criticalRes,
+    usage_logs_this_month,
+  ] = await Promise.all([
+    headCount(admin.from('boxes').select('id', { count: 'exact', head: true }).eq('is_active', true)),
+    admin.from('boxes').select('id, created_at, inspection_frequency_days').eq('is_active', true),
+    admin.from('inspections').select('box_id, created_at').order('created_at', { ascending: false }),
+    headCount(
+      admin.from('topup_requests').select('id', { count: 'exact', head: true }).in('status', ['Open', 'In Progress']),
+    ),
+    admin.from('topup_requests').select('box_id').in('status', ['Open', 'In Progress']),
+    admin
+      .from('box_items')
+      .select('box_id')
+      .eq('is_active', true)
+      .eq('has_expiry', true)
+      .not('expiry_date', 'is', null)
+      .lt('expiry_date', today),
+    admin
+      .from('box_items')
+      .select('box_id')
+      .eq('is_active', true)
+      .eq('has_expiry', true)
+      .gte('expiry_date', today)
+      .lte('expiry_date', soon),
+    admin
+      .from('box_items')
+      .select('box_id')
+      .eq('is_active', true)
+      .eq('has_expiry', true)
+      .gte('expiry_date', today)
+      .lte('expiry_date', urgent),
+    admin.from('box_items').select('box_id').eq('is_active', true).eq('has_expiry', true).is('expiry_date', null),
+    admin
+      .from('box_items')
+      .select('box_id')
+      .eq('is_active', true)
+      .eq('has_expiry', true)
+      .eq('expiry_status', 'No expiry date recorded'),
+    admin
+      .from('box_items')
+      .select('box_id')
+      .eq('is_active', true)
+      .eq('has_expiry', true)
+      .eq('expiry_status', 'Expiry label mismatch'),
+    admin.from('box_items_effective').select('id').eq('is_active', true).is('effective_item_photo_url', null),
+    admin
+      .from('box_items_effective')
+      .select('id')
+      .eq('is_active', true)
+      .eq('is_critical', true)
+      .eq('has_expiry', true)
+      .not('expiry_date', 'is', null)
+      .lt('expiry_date', today),
+    headCount(
+      admin.from('first_aid_usage_logs').select('id', { count: 'exact', head: true }).gte('created_at', startOfMonth),
+    ),
+  ]);
+
+  const boxes = boxesRes.data;
+  const insp = inspRes.data;
+  const topupBoxes = topupBoxesRes.data;
+  const expiredItems = expiredRes.data;
+  const soonItems = soonRes.data;
+  const urgentItems = urgentRes.data;
+  const missingExpiryDateItems = missingDateRes.data;
+  const missingExpiryStatusItems = missingStatusRes.data;
+  const mismatchItems = mismatchRes.data;
+  const noPhotoItems = noPhotoRes.data;
+  const criticalExpired = criticalRes.data;
 
   // Overdue + inspected-this-month need the latest inspection per box.
-  const { data: boxes } = await admin
-    .from('boxes')
-    .select('id, created_at, inspection_frequency_days')
-    .eq('is_active', true);
-  const { data: insp } = await admin
-    .from('inspections')
-    .select('box_id, created_at')
-    .order('created_at', { ascending: false });
-
   const lastByBox = new Map<string, string>();
   const inspectedThisMonth = new Set<string>();
   for (const r of (insp ?? []) as { box_id: string; created_at: string }[]) {
@@ -57,101 +129,20 @@ async function buildDashboard(admin: Admin) {
     if (due.due_status === 'Overdue') overdue_boxes++;
   }
 
-  const open_topup_requests = await headCount(
-    admin
-      .from('topup_requests')
-      .select('id', { count: 'exact', head: true })
-      .in('status', ['Open', 'In Progress']),
-  );
-
-  const { data: topupBoxes } = await admin
-    .from('topup_requests')
-    .select('box_id')
-    .in('status', ['Open', 'In Progress']);
-  const boxes_needing_topup = new Set(
-    ((topupBoxes ?? []) as { box_id: string }[]).map((t) => t.box_id),
-  ).size;
-
-  const { data: expiredItems } = await admin
-    .from('box_items')
-    .select('box_id')
-    .eq('is_active', true)
-    .eq('has_expiry', true)
-    .not('expiry_date', 'is', null)
-    .lt('expiry_date', today);
-  const boxes_with_expired_items = new Set(
-    ((expiredItems ?? []) as { box_id: string }[]).map((i) => i.box_id),
-  ).size;
-
-  const { data: soonItems } = await admin
-    .from('box_items')
-    .select('box_id')
-    .eq('is_active', true)
-    .eq('has_expiry', true)
-    .gte('expiry_date', today)
-    .lte('expiry_date', soon);
+  const boxes_needing_topup = new Set(((topupBoxes ?? []) as { box_id: string }[]).map((t) => t.box_id)).size;
+  const boxes_with_expired_items = new Set(((expiredItems ?? []) as { box_id: string }[]).map((i) => i.box_id)).size;
   const boxes_with_expiring_soon_items = new Set(
     ((soonItems ?? []) as { box_id: string }[]).map((i) => i.box_id),
   ).size;
-
-  const { data: urgentItems } = await admin
-    .from('box_items')
-    .select('box_id')
-    .eq('is_active', true)
-    .eq('has_expiry', true)
-    .gte('expiry_date', today)
-    .lte('expiry_date', urgent);
   const items_expiring_within_30_days = (urgentItems ?? []).length;
-
-  const { data: missingExpiryDateItems } = await admin
-    .from('box_items')
-    .select('box_id')
-    .eq('is_active', true)
-    .eq('has_expiry', true)
-    .is('expiry_date', null);
-  const { data: missingExpiryStatusItems } = await admin
-    .from('box_items')
-    .select('box_id')
-    .eq('is_active', true)
-    .eq('has_expiry', true)
-    .eq('expiry_status', 'No expiry date recorded');
   const boxes_with_missing_expiry_dates = new Set(
     ([...(missingExpiryDateItems ?? []), ...(missingExpiryStatusItems ?? [])] as { box_id: string }[]).map(
       (i) => i.box_id,
     ),
   ).size;
-
-  const { data: mismatchItems } = await admin
-    .from('box_items')
-    .select('box_id')
-    .eq('is_active', true)
-    .eq('has_expiry', true)
-    .eq('expiry_status', 'Expiry label mismatch');
   const boxes_with_expiry_label_mismatch = new Set(
     ((mismatchItems ?? []) as { box_id: string }[]).map((i) => i.box_id),
   ).size;
-
-  // Item-level action counts for the decision dashboard cards.
-  const { data: noPhotoItems } = await admin
-    .from('box_items_effective')
-    .select('id')
-    .eq('is_active', true)
-    .is('effective_item_photo_url', null);
-  const { data: criticalExpired } = await admin
-    .from('box_items_effective')
-    .select('id')
-    .eq('is_active', true)
-    .eq('is_critical', true)
-    .eq('has_expiry', true)
-    .not('expiry_date', 'is', null)
-    .lt('expiry_date', today);
-
-  const usage_logs_this_month = await headCount(
-    admin
-      .from('first_aid_usage_logs')
-      .select('id', { count: 'exact', head: true })
-      .gte('created_at', startOfMonth),
-  );
 
   return {
     total_boxes,
