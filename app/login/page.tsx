@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { getSupabaseBrowserClient, getSupabasePasswordResetClient } from '@/lib/supabase/client';
 import { api } from '@/lib/client/api.ts';
 import { takeIntendedPath } from '@/lib/client/intent.ts';
 import { CompanyLogo } from '@/components/CompanyLogo';
@@ -142,7 +142,7 @@ export default function LoginPage() {
     setResetSending(true);
     setError(null);
     setNotice(null);
-    const { error: resetError } = await getSupabaseBrowserClient().auth.resetPasswordForEmail(
+    const { error: resetError } = await getSupabasePasswordResetClient().auth.resetPasswordForEmail(
       targetEmail,
       {
         redirectTo: `${window.location.origin}/reset-password`,
