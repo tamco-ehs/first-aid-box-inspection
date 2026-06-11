@@ -450,17 +450,28 @@ function InspectionsReport({
             <p className="text-xs text-slate-500">
               {formatDateTime(r.created_at)} - {r.inspector_name}
             </p>
+            <a
+              href={inspectionPdfHref(r.id)}
+              download
+              className="btn btn-md btn-secondary mt-3 w-full"
+              aria-label={`Download audit PDF for inspection ${r.id}`}
+            >
+              Download audit PDF
+            </a>
           </div>
         ))}
       </div>
       <Table
-        head={['Date', 'Box', 'Area', 'Inspector', 'Status']}
+        head={['Date', 'Box', 'Area', 'Inspector', 'Status', 'Audit PDF']}
         rows={rows.map((r) => [
           formatDateTime(r.created_at),
           r.boxes?.box_code ?? '-',
           r.boxes?.area ?? '-',
           r.inspector_name,
           <OverallBadge key="s" status={r.overall_status} />,
+          <a key="pdf" href={inspectionPdfHref(r.id)} download className="btn btn-md btn-secondary">
+            PDF
+          </a>,
         ])}
       />
     </section>
@@ -919,6 +930,10 @@ function dotToneClass(t: ReportTone) {
 
 function boxLabel(box: BoxLite | undefined, fallback?: string | null) {
   return box?.box_code ?? fallback ?? 'Unknown box';
+}
+
+function inspectionPdfHref(inspectionId: string) {
+  return `/api/reports/inspections/${encodeURIComponent(inspectionId)}/pdf`;
 }
 
 function expiryTone(status: ReportsResponse['expiry_items'][number]['expiry_status']): ReportTone {
