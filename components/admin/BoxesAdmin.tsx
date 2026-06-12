@@ -29,14 +29,6 @@ export function BoxesAdmin() {
       {msg && <Notice kind={msg.kind}>{msg.text}</Notice>}
       {boxes.error && <Notice kind="error">{boxes.error}</Notice>}
 
-      <ActualBoxRegisterPanel
-        onRegistered={(text) => {
-          setMsg({ kind: 'ok', text });
-          boxes.reload();
-        }}
-        onError={(t) => setMsg({ kind: 'error', text: t })}
-      />
-
       <NewBoxForm
         templates={templates.data ?? []}
         onCreated={() => {
@@ -62,63 +54,7 @@ export function BoxesAdmin() {
   );
 }
 
-function ActualBoxRegisterPanel({
-  onRegistered,
-  onError,
-}: {
-  onRegistered: (t: string) => void;
-  onError: (t: string) => void;
-}) {
-  const [busy, setBusy] = useState(false);
 
-  async function registerActualBoxes() {
-    const ok = window.confirm(
-      'Register the 23 actual TAMCO first aid boxes and remove the two demo boxes? This should be run once on the live app.',
-    );
-    if (!ok) return;
-
-    setBusy(true);
-    try {
-      const res = await fetch('/api/admin/register-actual-boxes', { method: 'POST' });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(body?.error?.message ?? 'Could not register the actual first aid boxes.');
-      }
-      onRegistered(
-        `Registered ${body.boxes_registered} actual boxes, removed ${body.demo_boxes_removed} demo boxes, and created ${body.checklist_items_created} checklist rows.`,
-      );
-    } catch (e) {
-      onError(e instanceof Error ? e.message : 'Could not register the actual first aid boxes.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Section
-      title="Actual first aid box register"
-      actions={
-        <Badge tone="neutral">
-          23 boxes
-        </Badge>
-      }
-    >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm text-slate-700">
-            Use this once to register REC-01 through PAI-01 from the approved location list.
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            The action removes the old demo boxes and applies the current checklist template to each real box.
-          </p>
-        </div>
-        <button onClick={registerActualBoxes} disabled={busy} className="btn btn-md btn-primary">
-          {busy ? <Spinner className="h-4 w-4" /> : 'Register actual boxes'}
-        </button>
-      </div>
-    </Section>
-  );
-}
 
 function NewBoxForm({
   templates,
