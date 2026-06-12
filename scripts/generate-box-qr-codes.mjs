@@ -53,13 +53,19 @@ async function main() {
       {
         kind: 'inspection',
         label: 'Inspection QR',
-        description: 'Scan to complete the monthly first aid box inspection.',
+        actionTitle: 'INSPECTION',
+        actionSubtitle: 'SCAN TO INSPECT THIS BOX',
+        description: 'Monthly first aid box checklist',
+        accent: '#dc2626',
         url: `${appUrl}/inspect/${box.id}`,
       },
       {
         kind: 'usage',
         label: 'Usage QR',
-        description: 'Scan to record items taken from this first aid box.',
+        actionTitle: 'USAGE LOG',
+        actionSubtitle: 'SCAN WHEN TAKING ITEMS',
+        description: 'Record first aid items taken',
+        accent: '#059669',
         url: `${appUrl}/usage?box=${box.id}&code=${encodeURIComponent(box.code)}`,
       },
     ];
@@ -70,11 +76,14 @@ async function main() {
         qr: encodeQr(link.url),
         box,
         title: `${box.code} ${link.label}`,
+        actionTitle: link.actionTitle,
+        actionSubtitle: link.actionSubtitle,
         description: link.description,
+        accent: link.accent,
         url: link.url,
       });
       await writeFile(path.join(outDir, fileName), svg, 'utf8');
-      generated.push({ fileName, box: box.code, type: link.kind, url: link.url });
+      generated.push({ fileName, box: box.code, type: link.kind, label: link.actionTitle, url: link.url });
     }
   }
 
@@ -372,15 +381,15 @@ function getFormatBits(mask) {
   return ((data << 10) | rem) ^ 0x5412;
 }
 
-function makeCardSvg({ qr, box, title, description, url }) {
+function makeCardSvg({ qr, box, title, actionTitle, actionSubtitle, description, accent, url }) {
   const width = 850;
   const height = 1100;
   const quiet = 4;
-  const qrMax = 560;
+  const qrMax = 520;
   const module = Math.floor(qrMax / (qr.size + quiet * 2));
   const qrSize = module * (qr.size + quiet * 2);
   const qrX = Math.round((width - qrSize) / 2);
-  const qrY = 205;
+  const qrY = 390;
   const pathData = [];
   for (let y = 0; y < qr.size; y++) {
     for (let x = 0; x < qr.size; x++) {
@@ -391,33 +400,36 @@ function makeCardSvg({ qr, box, title, description, url }) {
   }
 
   const lines = [
-    ...wrapText(box.name, 42),
+    ...wrapText(box.name, 48),
     box.area ? `Area: ${box.area}` : '',
     box.location ? `Location: ${box.location}` : '',
   ].filter(Boolean);
-  const urlLines = wrapText(url, 58);
+  const domain = new URL(url).hostname.replace(/^www\./, '');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeXml(title)}">
   <rect width="100%" height="100%" rx="34" fill="#ffffff"/>
-  <rect x="0" y="0" width="${width}" height="116" rx="34" fill="#0b7fc3"/>
-  <text x="64" y="75" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800" fill="#ffffff">TAMCO</text>
-  <text x="${width - 64}" y="52" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" fill="#dff4ff">First Aid Box</text>
-  <text x="${width - 64}" y="78" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#dff4ff">QR access label</text>
+  <rect x="0" y="0" width="${width}" height="104" rx="34" fill="#0b7fc3"/>
+  <text x="58" y="66" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800" fill="#ffffff">TAMCO</text>
+  <text x="${width - 58}" y="50" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" fill="#dff4ff">First Aid Box</text>
+  <text x="${width - 58}" y="74" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#dff4ff">QR access label</text>
 
-  <text x="64" y="157" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="800" fill="#0f172a">${escapeXml(title)}</text>
-  <text x="64" y="188" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#475569">${escapeXml(description)}</text>
+  <rect x="48" y="128" width="${width - 96}" height="142" rx="26" fill="${accent}"/>
+  <text x="${width / 2}" y="196" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="900" fill="#ffffff">${escapeXml(actionTitle)}</text>
+  <text x="${width / 2}" y="236" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="800" fill="#ffffff">${escapeXml(actionSubtitle)}</text>
 
-  <rect x="${qrX - 20}" y="${qrY - 20}" width="${qrSize + 40}" height="${qrSize + 40}" rx="22" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="${width / 2}" y="316" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="40" font-weight="900" fill="#0f172a">${escapeXml(box.code)}</text>
+  <text x="${width / 2}" y="344" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#475569">${escapeXml(description)}</text>
+
+  <rect x="${qrX - 18}" y="${qrY - 18}" width="${qrSize + 36}" height="${qrSize + 36}" rx="24" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
   <rect x="${qrX}" y="${qrY}" width="${qrSize}" height="${qrSize}" fill="#ffffff"/>
   <path d="${pathData.join('')}" fill="#020617"/>
 
-  <text x="64" y="835" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="800" fill="#0f172a">${escapeXml(box.code)}</text>
-${lines.map((line, index) => `  <text x="64" y="${872 + index * 28}" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#334155">${escapeXml(line)}</text>`).join('\n')}
+  <rect x="48" y="918" width="${width - 96}" height="118" rx="20" fill="#f8fafc" stroke="#e2e8f0" stroke-width="2"/>
+  <text x="76" y="956" font-family="Arial, Helvetica, sans-serif" font-size="23" font-weight="900" fill="#0f172a">${escapeXml(box.code)}</text>
+${lines.slice(0, 3).map((line, index) => `  <text x="76" y="${986 + index * 25}" font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#334155">${escapeXml(line)}</text>`).join('\n')}
 
-  <rect x="64" y="965" width="${width - 128}" height="78" rx="16" fill="#eff6ff"/>
-  <text x="86" y="994" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700" fill="#1d4ed8">Encoded link</text>
-${urlLines.map((line, index) => `  <text x="86" y="${1022 + index * 18}" font-family="Consolas, 'Courier New', monospace" font-size="13" fill="#0f172a">${escapeXml(line)}</text>`).join('\n')}
+  <text x="${width / 2}" y="1072" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#64748b">Opens ${escapeXml(domain)}</text>
 </svg>
 `;
 }
@@ -446,7 +458,7 @@ function makeIndexHtml(items) {
     <h1>First Aid Box QR Codes</h1>
     <p>Print the inspection QR on the inspection record sheet, and the usage QR beside the box for item withdrawal logging.</p>
     <div class="grid">
-      ${items.map((item) => `<a href="./${item.fileName}" download><img src="./${item.fileName}" alt="${escapeXml(item.box)} ${escapeXml(item.type)} QR"><strong>${escapeXml(item.box)} ${escapeXml(item.type)}</strong><span>${escapeXml(item.url)}</span></a>`).join('\n      ')}
+      ${items.map((item) => `<a href="./${item.fileName}" download><img src="./${item.fileName}" alt="${escapeXml(item.box)} ${escapeXml(item.label)} QR"><strong>${escapeXml(item.label)} - ${escapeXml(item.box)}</strong><span>${escapeXml(item.url)}</span></a>`).join('\n      ')}
     </div>
   </main>
 </body>
