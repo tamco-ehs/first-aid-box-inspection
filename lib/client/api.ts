@@ -55,6 +55,8 @@ function safeJson(text: string): unknown {
 
 export interface InspectionSubmitBody {
   box_id: string;
+  inspector_name?: string | null;
+  inspector_department?: string | null;
   notes?: string | null;
   box_photo_url: string;
   box_photo_cloudinary_public_id?: string | null;

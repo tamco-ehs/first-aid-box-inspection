@@ -1,24 +1,23 @@
 // POST /api/inspections - submit a first aid box inspection.
 //
 // Security (all server-side, never trusting the client):
-//   1. authenticated + active                          (requireActive)
-//   2. role is admin or first_aider                    (requireRole)
+//   1. public QR inspection flow is allowed for active boxes
+//   2. logged-in admin/first_aider identity is used when present
 //   3. box exists and is active                        (DB lookup)
-//   4. caller may write this box                       (requireBoxAccess)
-//   5. box photo is one of OUR Cloudinary URLs         (isAllowedCloudinaryUrl)
-//   6. every submitted item belongs to this box        (spec map lookup)
-//   7. each observation is valid for its measure type  (validateObservation)
+//   4. box photo is one of OUR Cloudinary URLs         (isAllowedCloudinaryUrl)
+//   5. every submitted item belongs to this box        (spec map lookup)
+//   6. each observation is valid for its measure type  (validateObservation)
 //
 // All item statuses and the overall verdict are RECOMPUTED here from the stored
 // box_items spec - values sent by the client are ignored. Writes go through the
 // service-role client (top-ups and box-item state are admin-only under RLS);
-// the inspector identity is still pinned to auth.uid() and re-snapshotted by a
-// DB trigger. On any post-insert failure the inspection is rolled back so the
-// operation is atomic.
+// logged-in inspector identity is pinned to auth.uid() and re-snapshotted by a
+// DB trigger; public QR submissions store the typed inspector name with
+// inspector_id=null. On any post-insert failure the inspection is rolled back.
 
 import { ApiError, badRequest, jsonOk, notFound, safe } from '@/lib/http';
-import { requireActive, requireBoxAccess, requireRole } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { createUserClient } from '@/lib/supabase/server';
 import { PUBLIC_ENV, SERVER_ENV } from '@/lib/env';
 import { buildActionEmail, sendEmail } from '@/lib/email';
 import { INSPECTION_PHOTO_FOLDER, isAllowedCloudinaryUrl } from '@/lib/logic/cloudinary-url.ts';
@@ -31,7 +30,7 @@ import {
 } from '@/lib/logic/inspection.ts';
 import { buildTopupRows, topupKey } from '@/lib/logic/topup.ts';
 import type { BoxItemSpec, EvaluatedItem, Observation } from '@/lib/logic/types.ts';
-import { inspectionSubmitSchema, firstZodMessage } from '@/lib/validation';
+import { inspectionSubmitSchema, firstZodMessage, type InspectionSubmit } from '@/lib/validation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -59,16 +58,20 @@ interface BoxRow {
   location_description: string;
 }
 
+interface InspectorIdentity {
+  userId: string | null;
+  name: string;
+  department: string | null;
+}
+
 export async function POST(req: Request): Promise<Response> {
   return safe(async () => {
-    const ctx = await requireActive();
-    requireRole(ctx, ['admin', 'first_aider']);
-
     const parsed = inspectionSubmitSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) throw badRequest(firstZodMessage(parsed.error));
     const body = parsed.data;
 
     const admin = createAdminClient();
+    const inspector = await resolveInspectorIdentity(admin, body);
 
     // 3. box exists + active
     const { data: box } = await admin
@@ -80,9 +83,6 @@ export async function POST(req: Request): Promise<Response> {
     if (!boxRow || !boxRow.is_active) {
       throw notFound('First aid box not found or inactive.');
     }
-
-    // 4. caller may write this box (admin: any; first_aider: assigned only)
-    await requireBoxAccess(ctx, body.box_id, { write: true });
 
     // 5. box photo must be a real upload in our inspection folder
     if (
@@ -179,9 +179,9 @@ export async function POST(req: Request): Promise<Response> {
       .from('inspections')
       .insert({
         box_id: body.box_id,
-        inspector_id: ctx.userId, // pinned to the caller; trigger re-snapshots name/dept
-        inspector_name: ctx.profile.full_name,
-        inspector_department: ctx.profile.department,
+        inspector_id: inspector.userId,
+        inspector_name: inspector.name,
+        inspector_department: inspector.department,
         overall_status: overall,
         box_photo_url: body.box_photo_url,
         box_photo_cloudinary_public_id: body.box_photo_cloudinary_public_id ?? null,
@@ -247,7 +247,7 @@ export async function POST(req: Request): Promise<Response> {
       const topupRows = buildTopupRows({
         boxId: body.box_id,
         inspectionId,
-        requestedBy: ctx.userId,
+        requestedBy: inspector.userId,
         lines: lines.map((l) => ({
           evaluated: l.ev,
           inspectionItemId: itemIdByBoxItem.get(l.ev.box_item_id) ?? null,
@@ -270,7 +270,7 @@ export async function POST(req: Request): Promise<Response> {
           boxCode: boxRow.box_code,
           boxName: boxRow.box_name,
           location: boxRow.location_description,
-          inspectorName: ctx.profile.full_name,
+          inspectorName: inspector.name,
           overallStatus: overall,
           submittedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
           boxId: body.box_id,
@@ -307,7 +307,7 @@ export async function POST(req: Request): Promise<Response> {
 
           if (expiryChoice === 'matches_label') {
             patch.last_verified_date = nowIso;
-            patch.last_verified_by = ctx.userId;
+            patch.last_verified_by = inspector.userId;
             patch.expiry_status =
               getExpiryReminderStatus(true, oldExpiry, l.spec.expiry_warning_days, l.spec.expiry_status, now) ?? 'Valid';
           }
@@ -315,7 +315,7 @@ export async function POST(req: Request): Promise<Response> {
           if (expiryChoice === 'different_date' && newExpiry) {
             patch.expiry_date = newExpiry;
             patch.last_verified_date = nowIso;
-            patch.last_verified_by = ctx.userId;
+            patch.last_verified_by = inspector.userId;
             patch.remarks = l.remarks;
             patch.expiry_status = getExpiryReminderStatus(true, newExpiry, l.spec.expiry_warning_days, null, now) ?? 'Valid';
             const { error: auditErr } = await admin.from('expiry_audit_logs').insert({
@@ -323,7 +323,7 @@ export async function POST(req: Request): Promise<Response> {
               box_item_id: l.ev.box_item_id,
               old_expiry_date: oldExpiry,
               new_expiry_date: newExpiry,
-              changed_by: ctx.userId,
+              changed_by: inspector.userId,
               reason: l.remarks,
               source: 'inspection_correction',
             });
@@ -332,30 +332,30 @@ export async function POST(req: Request): Promise<Response> {
 
           if (expiryChoice === 'no_label') {
             patch.last_verified_date = nowIso;
-            patch.last_verified_by = ctx.userId;
+            patch.last_verified_by = inspector.userId;
             patch.remarks = l.remarks;
             patch.expiry_status = 'Expiry label mismatch';
           }
 
           if (expiryChoice === 'expired') {
             patch.last_verified_date = nowIso;
-            patch.last_verified_by = ctx.userId;
+            patch.last_verified_by = inspector.userId;
             patch.remarks = l.remarks;
             patch.expiry_status = 'Expired';
           }
 
           if (expiryChoice === 'missing_not_replaced') {
             patch.last_verified_date = nowIso;
-            patch.last_verified_by = ctx.userId;
+            patch.last_verified_by = inspector.userId;
             patch.remarks = l.remarks;
           }
 
           if (expiryChoice === 'replaced_now' && newExpiry) {
             patch.expiry_date = newExpiry;
             patch.last_replaced_date = l.obs.replacement_date ?? today;
-            patch.last_replaced_by = ctx.userId;
+            patch.last_replaced_by = inspector.userId;
             patch.last_verified_date = nowIso;
-            patch.last_verified_by = ctx.userId;
+            patch.last_verified_by = inspector.userId;
             patch.remarks = l.remarks ?? null;
             patch.expiry_status = getExpiryReminderStatus(true, newExpiry, l.spec.expiry_warning_days, null, now) ?? 'Valid';
             patch.replacement_photo_url = l.obs.replacement_photo_url ?? null;
@@ -365,7 +365,7 @@ export async function POST(req: Request): Promise<Response> {
               box_item_id: l.ev.box_item_id,
               old_expiry_date: oldExpiry,
               new_expiry_date: newExpiry,
-              changed_by: ctx.userId,
+              changed_by: inspector.userId,
               reason: l.remarks,
               source: 'replacement',
               replacement_photo_url: l.obs.replacement_photo_url ?? null,
@@ -404,4 +404,61 @@ export async function POST(req: Request): Promise<Response> {
       throw new ApiError(500, 'inspection_failed', 'Could not complete the inspection submission.');
     }
   });
+}
+
+async function resolveInspectorIdentity(
+  admin: ReturnType<typeof createAdminClient>,
+  body: InspectionSubmit,
+): Promise<InspectorIdentity> {
+  const profile = await getLoggedInInspector(admin);
+  if (profile) return profile;
+
+  const name = body.inspector_name?.trim() ?? '';
+  if (name.length < 2) {
+    throw badRequest('Please enter the inspector name before submitting.');
+  }
+
+  return {
+    userId: null,
+    name,
+    department: body.inspector_department?.trim() || null,
+  };
+}
+
+async function getLoggedInInspector(
+  admin: ReturnType<typeof createAdminClient>,
+): Promise<InspectorIdentity | null> {
+  try {
+    const userClient = await createUserClient();
+    const {
+      data: { user },
+    } = await userClient.auth.getUser();
+    if (!user) return null;
+
+    const { data, error } = await admin
+      .from('profiles')
+      .select('id, full_name, department, role, is_active')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (error || !data) return null;
+
+    const profile = data as {
+      id: string;
+      full_name: string;
+      department: string | null;
+      role: string;
+      is_active: boolean;
+    };
+    if (!profile.is_active || (profile.role !== 'admin' && profile.role !== 'first_aider')) {
+      return null;
+    }
+
+    return {
+      userId: profile.id,
+      name: profile.full_name,
+      department: profile.department,
+    };
+  } catch {
+    return null;
+  }
 }

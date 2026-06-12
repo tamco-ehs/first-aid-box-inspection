@@ -15,7 +15,7 @@ import { hasObservation, toSpec } from '@/lib/client/inspect-helpers.ts';
 import { evaluateItem, validateObservation } from '@/lib/logic/inspection.ts';
 import { computeDue } from '@/lib/logic/due.ts';
 import { formatDate } from '@/lib/client/format.ts';
-import { RequireAuth, AccessBlocked } from '@/components/RequireAuth';
+import { AccessBlocked } from '@/components/RequireAuth';
 import { AppHeader } from '@/components/AppHeader';
 import { ChecklistCard } from '@/components/ChecklistCard';
 import { CompanyLogo } from '@/components/CompanyLogo';
@@ -26,7 +26,7 @@ import { Badge, DueBadge, OverallBadge, PriorityBadge } from '@/components/Statu
 export default function InspectPage() {
   const params = useParams<{ box_id: string }>();
   const boxId = params.box_id;
-  return <RequireAuth roles={['admin', 'first_aider']}>{(me) => <Inspect me={me} boxId={boxId} />}</RequireAuth>;
+  return <Inspect boxId={boxId} />;
 }
 
 type LoadError = { type: 'forbidden' | 'notfound' | 'other'; message: string };
@@ -51,8 +51,9 @@ interface ItemReview {
   hasRemarks: boolean;
 }
 
-function Inspect({ me, boxId }: { me: Me; boxId: string }) {
+function Inspect({ boxId }: { boxId: string }) {
   const now = useMemo(() => new Date(), []);
+  const [me, setMe] = useState<Me | null>(null);
   const [tpl, setTpl] = useState<InspectionTemplateResponse | null>(null);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
 
@@ -69,6 +70,27 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [lastEditedItemId, setLastEditedItemId] = useState<string | null>(null);
   const [stepDirection, setStepDirection] = useState<StepDirection>('forward');
+  const [inspectorName, setInspectorName] = useState('');
+  const [inspectorDepartment, setInspectorDepartment] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    api
+      .me()
+      .then((m) => {
+        if (!active || !m.is_active) return;
+        setMe(m);
+        setInspectorName((current) => current || m.full_name);
+        setInspectorDepartment((current) => current || m.department || '');
+      })
+      .catch(() => {
+        // QR inspections are allowed without login. A 401 here just means the
+        // inspector will enter their name manually for the audit record.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -146,7 +168,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   if (!tpl) return <FullScreenLoader label="Loading checklist..." />;
 
   if (result) {
-    return <ResultView result={result} tpl={tpl} />;
+    return <ResultView result={result} tpl={tpl} isSignedIn={Boolean(me)} />;
   }
 
   function getBaseValidationError(item: TemplateItem, value: DraftObservation): string | null {
@@ -256,6 +278,10 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   }
 
   function startInspection(): void {
+    if (!me && inspectorName.trim().length < 2) {
+      setSubmitError('Please enter your name before starting the inspection.');
+      return;
+    }
     setPhase('items');
     setSubmitError(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -331,6 +357,8 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
         box_photo_url: photo!.url,
         box_photo_cloudinary_public_id: photo!.publicId,
         submitted_device: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 120) : null,
+        inspector_name: me?.full_name ?? inspectorName.trim(),
+        inspector_department: (me?.department ?? inspectorDepartment.trim()) || null,
         inspection_items: tpl!.items.map((it) => {
           const o = obs[it.box_item_id] ?? {};
           return {
@@ -421,9 +449,15 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   if (phase === 'confirm') {
     return (
       <>
-        <AppHeader title="Confirm box" subtitle={tpl.box.box_code} backHref="/my-boxes" />
+        <AppHeader
+          title="Confirm box"
+          subtitle={tpl.box.box_code}
+          backHref={me ? '/my-boxes' : undefined}
+          showSignOut={Boolean(me)}
+        />
         <main className="mx-auto max-w-md space-y-3 p-4">
           {draftBanner}
+          {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
           <section className="card p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -442,13 +476,48 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
                 </>
               )}
               <dt className="text-slate-500">Inspector</dt>
-              <dd className="col-span-2 font-medium">{me.full_name}</dd>
+              <dd className="col-span-2 font-medium">{me?.full_name ?? 'Enter below'}</dd>
               <dt className="text-slate-500">Last check</dt>
               <dd className="col-span-2 font-medium">{formatDate(tpl.last_inspection?.created_at)}</dd>
             </dl>
             <p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">{guidanceNote}</p>
           </section>
-          <button type="button" onClick={startInspection} className="btn btn-lg btn-primary w-full" data-tour="inspect-start">
+
+          {!me && (
+            <section className="card p-4">
+              <h2 className="font-semibold">Inspector details</h2>
+              <div className="mt-3 space-y-3">
+                <label className="block">
+                  <span className="label">Your name</span>
+                  <input
+                    className="input"
+                    value={inspectorName}
+                    onChange={(e) => setInspectorName(e.target.value)}
+                    placeholder="First aider name"
+                    autoComplete="name"
+                  />
+                </label>
+                <label className="block">
+                  <span className="label">Department / PIC area (optional)</span>
+                  <input
+                    className="input"
+                    value={inspectorDepartment}
+                    onChange={(e) => setInspectorDepartment(e.target.value)}
+                    placeholder="EHS, Production, Office..."
+                    autoComplete="organization-title"
+                  />
+                </label>
+              </div>
+            </section>
+          )}
+
+          <button
+            type="button"
+            onClick={startInspection}
+            disabled={!me && inspectorName.trim().length < 2}
+            className="btn btn-lg btn-primary w-full"
+            data-tour="inspect-start"
+          >
             Start Inspection
           </button>
         </main>
@@ -459,7 +528,12 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   if (phase === 'review') {
     return (
       <>
-        <AppHeader title="Final review" subtitle={tpl.box.box_code} backHref="/my-boxes" />
+        <AppHeader
+          title="Final review"
+          subtitle={tpl.box.box_code}
+          backHref={me ? '/my-boxes' : undefined}
+          showSignOut={Boolean(me)}
+        />
         <main className="mx-auto max-w-md space-y-3 p-4 pb-28">
           {draftBanner}
           {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
@@ -622,7 +696,11 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
 
       {activeSheet === 'details' && (
         <BottomSheet title="Box details" onClose={() => setActiveSheet(null)}>
-          <BoxDetails tpl={tpl} me={me} guidanceNote={guidanceNote} />
+          <BoxDetails
+            tpl={tpl}
+            inspectorName={me?.full_name ?? inspectorName.trim()}
+            guidanceNote={guidanceNote}
+          />
         </BottomSheet>
       )}
 
@@ -657,11 +735,11 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
 
 function BoxDetails({
   tpl,
-  me,
+  inspectorName,
   guidanceNote,
 }: {
   tpl: InspectionTemplateResponse;
-  me: Me;
+  inspectorName: string;
   guidanceNote: string;
 }) {
   return (
@@ -680,7 +758,7 @@ function BoxDetails({
           </>
         )}
         <dt className="text-slate-500">Inspector</dt>
-        <dd className="col-span-2 font-medium">{me.full_name}</dd>
+        <dd className="col-span-2 font-medium">{inspectorName || 'Not entered'}</dd>
         <dt className="text-slate-500">Last check</dt>
         <dd className="col-span-2 font-medium">{formatDate(tpl.last_inspection?.created_at)}</dd>
       </dl>
@@ -743,14 +821,16 @@ function BottomSheet({ title, onClose, children }: { title: string; onClose: () 
 function ResultView({
   result,
   tpl,
+  isSignedIn,
 }: {
   result: InspectionResult;
   tpl: InspectionTemplateResponse;
+  isSignedIn: boolean;
 }) {
   const s = result.summary;
   return (
     <>
-      <AppHeader title="Inspection submitted" subtitle={tpl.box.box_name} />
+      <AppHeader title="Inspection submitted" subtitle={tpl.box.box_name} showSignOut={isSignedIn} />
       <main className="mx-auto max-w-3xl space-y-4 p-4">
         <section className="card flex flex-col items-center gap-3 p-6 text-center">
           <OverallBadge status={result.overall_status} />
@@ -778,10 +858,12 @@ function ResultView({
           )}
         </section>
 
-        <div className="grid grid-cols-2 gap-3">
-          <a href="/my-boxes" className="btn btn-lg btn-secondary">
-            My boxes
-          </a>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {isSignedIn && (
+            <a href="/my-boxes" className="btn btn-lg btn-secondary">
+              My boxes
+            </a>
+          )}
           <a href={`/inspect/${tpl.box.box_id}`} className="btn btn-lg btn-primary" onClick={() => location.reload()}>
             Done
           </a>

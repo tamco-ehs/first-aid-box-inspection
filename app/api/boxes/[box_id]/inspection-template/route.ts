@@ -2,10 +2,9 @@
 // form is generated from: box details, template, every active box item (with
 // its effective reference photo and current known state), and a short summary
 // of the last inspection.
-//   admin: any active box | first_aider: assigned only | viewer: read-only
-// Anyone else -> 403 (handled inside requireBoxAccess).
+// This route is public on purpose: QR inspection links must open the checklist
+// directly at the first aid box without requiring a login.
 
-import { requireActive, requireBoxAccess } from '@/lib/auth';
 import { jsonOk, notFound, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getExpiryReminderStatus } from '@/lib/logic/inspection.ts';
@@ -40,9 +39,6 @@ export async function GET(
 ): Promise<Response> {
   return safe(async () => {
     const { box_id } = await params;
-    const ctx = await requireActive();
-    await requireBoxAccess(ctx, box_id, { write: false });
-
     const admin = createAdminClient();
 
     const { data: box } = await admin
