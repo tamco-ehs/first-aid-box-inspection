@@ -252,6 +252,19 @@ function BoxRow({
         </button>
       </div>
 
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <QrAssetCard
+          title="Inspection QR"
+          description="Print this for the monthly inspection record."
+          href={qrAssetPath(box.box_code, 'inspection')}
+        />
+        <QrAssetCard
+          title="Usage QR"
+          description="Print this near the box for item withdrawals."
+          href={qrAssetPath(box.box_code, 'usage')}
+        />
+      </div>
+
       <div className="mt-3 flex gap-2">
         <button onClick={save} disabled={busy} className="btn btn-md btn-primary">
           {busy ? <Spinner className="h-4 w-4" /> : 'Save'}
@@ -264,6 +277,44 @@ function BoxRow({
   );
 }
 
+function QrAssetCard({
+  title,
+  description,
+  href,
+}: {
+  title: string;
+  description: string;
+  href: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <div className="flex gap-3">
+        <a href={href} target="_blank" rel="noreferrer" className="block shrink-0" aria-label={`Open ${title}`}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={href}
+            alt=""
+            loading="lazy"
+            className="h-24 w-20 rounded-lg border border-slate-200 bg-slate-50 object-cover"
+          />
+        </a>
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold">{title}</h3>
+          <p className="mt-1 text-sm text-slate-600">{description}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <a href={href} target="_blank" rel="noreferrer" className="btn btn-sm btn-secondary">
+              Open
+            </a>
+            <a href={href} download className="btn btn-sm btn-primary">
+              Download
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UrlRow({ label, url }: { label: string; url: string }) {
   return (
     <div className="truncate">
@@ -271,6 +322,14 @@ function UrlRow({ label, url }: { label: string; url: string }) {
       <span className="font-mono">{url}</span>
     </div>
   );
+}
+
+function qrAssetPath(boxCode: string, type: 'inspection' | 'usage') {
+  return `/qr-codes/first-aid-boxes/${safeBoxCode(boxCode)}-${type}-qr.svg`;
+}
+
+function safeBoxCode(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
 function L({ label, children }: { label: string; children: React.ReactNode }) {
