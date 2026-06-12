@@ -143,24 +143,132 @@ on conflict (id) do nothing;
 
 
 -- =============================================================================
--- 3. EXAMPLE BOXES (instantiated from the template)
+-- 3. ACTUAL FIRST AID BOX REGISTER (instantiated from the template)
 -- =============================================================================
 insert into public.boxes
   (id, box_code, box_name, location_description, area, template_id, inspection_frequency_days)
 values
   ('11111111-1111-4111-8111-111111111111',
-   'FAB-WH-001', 'Warehouse A First Aid Box',
-   'Warehouse A near forklift charging area', 'Warehouse',
+   'REC-01', 'REC-01 First Aid Box',
+   'Reception', 'Office',
    'a0000000-0000-4000-8000-000000000001', 30),
   ('22222222-2222-4222-8222-222222222222',
-   'FAB-PR-001', 'Production Line 1 First Aid Box',
-   'Production hall, line 1, beside supervisor desk', 'Production',
+   'OFF-01', 'OFF-01 First Aid Box',
+   'Office 1st Floor, Near Lift', 'Office',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000003',
+   'OFF-02', 'OFF-02 First Aid Box',
+   'Office 1st Floor, Purchasing', 'Office',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000004',
+   'OFF-03', 'OFF-03 First Aid Box',
+   'Office 2nd Floor, Lift', 'Office',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000005',
+   'OFF-04', 'OFF-04 First Aid Box',
+   'Office 2nd Floor, AE', 'Office',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000006',
+   'PRO-01', 'PRO-01 First Aid Box',
+   'Production Office', 'Office',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000007',
+   'LOA-01', 'LOA-01 First Aid Box',
+   'Loading Area', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000008',
+   'VCB-01', 'VCB-01 First Aid Box',
+   'VCB Entrance', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000009',
+   'RND-01', 'RND-01 First Aid Box',
+   'R&D Entrance', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000010',
+   'RMU-01', 'RMU-01 First Aid Box',
+   'RMU, Inside', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000011',
+   'GIS-01', 'GIS-01 First Aid Box',
+   'GIS Walkway', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000012',
+   'WIR-01', 'WIR-01 First Aid Box',
+   'Wire Harness Area', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000013',
+   'WIR-02', 'WIR-02 First Aid Box',
+   'Wire Assembly', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000014',
+   'STO-01', 'STO-01 First Aid Box',
+   'Store', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000015',
+   'STO-02', 'STO-02 First Aid Box',
+   'Store Office', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000016',
+   'TES-01', 'TES-01 First Aid Box',
+   'Testing Area', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000017',
+   'AIS-01', 'AIS-01 First Aid Box',
+   'New AIS Assembly', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000018',
+   'AIS-02', 'AIS-02 First Aid Box',
+   'AIS Testing', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000019',
+   'FAB-01', 'FAB-01 First Aid Box',
+   'Fabrication Area', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000020',
+   'GUA-01', 'GUA-01 First Aid Box',
+   'Guard Post 2', 'External',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000021',
+   'GUA-02', 'GUA-02 First Aid Box',
+   'Guard Post 1', 'External',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000022',
+   'GIS-02', 'GIS-02 First Aid Box',
+   'GIS, Inside', 'Production',
+   'a0000000-0000-4000-8000-000000000001', 30),
+  ('b0000000-0000-4000-8000-000000000023',
+   'PAI-01', 'PAI-01 First Aid Box',
+   'Paintshop', 'Production',
    'a0000000-0000-4000-8000-000000000001', 30)
 on conflict (id) do nothing;
 
 -- Copy the template's 22 items into each box (skips items already present).
-select public.apply_template_to_box('11111111-1111-4111-8111-111111111111') as warehouse_items_created;
-select public.apply_template_to_box('22222222-2222-4222-8222-222222222222') as production_items_created;
+select public.apply_template_to_box(id) as items_created
+  from (values
+    ('11111111-1111-4111-8111-111111111111'::uuid),
+    ('22222222-2222-4222-8222-222222222222'::uuid),
+    ('b0000000-0000-4000-8000-000000000003'::uuid),
+    ('b0000000-0000-4000-8000-000000000004'::uuid),
+    ('b0000000-0000-4000-8000-000000000005'::uuid),
+    ('b0000000-0000-4000-8000-000000000006'::uuid),
+    ('b0000000-0000-4000-8000-000000000007'::uuid),
+    ('b0000000-0000-4000-8000-000000000008'::uuid),
+    ('b0000000-0000-4000-8000-000000000009'::uuid),
+    ('b0000000-0000-4000-8000-000000000010'::uuid),
+    ('b0000000-0000-4000-8000-000000000011'::uuid),
+    ('b0000000-0000-4000-8000-000000000012'::uuid),
+    ('b0000000-0000-4000-8000-000000000013'::uuid),
+    ('b0000000-0000-4000-8000-000000000014'::uuid),
+    ('b0000000-0000-4000-8000-000000000015'::uuid),
+    ('b0000000-0000-4000-8000-000000000016'::uuid),
+    ('b0000000-0000-4000-8000-000000000017'::uuid),
+    ('b0000000-0000-4000-8000-000000000018'::uuid),
+    ('b0000000-0000-4000-8000-000000000019'::uuid),
+    ('b0000000-0000-4000-8000-000000000020'::uuid),
+    ('b0000000-0000-4000-8000-000000000021'::uuid),
+    ('b0000000-0000-4000-8000-000000000022'::uuid),
+    ('b0000000-0000-4000-8000-000000000023'::uuid)
+  ) as box_ids(id);
 
 
 -- =============================================================================
@@ -202,5 +310,5 @@ update public.profiles
 --
 -- insert into public.box_assignments (box_id, profile_id, is_primary_responsible, assigned_by)
 -- values
---   ('11111111-1111-4111-8111-111111111111', '<first-aider-uuid>', true,  '<admin-uuid>'),
---   ('22222222-2222-4222-8222-222222222222', '<first-aider-uuid>', false, '<admin-uuid>');
+--   ('11111111-1111-4111-8111-111111111111', '<first-aider-uuid>', true,  '<admin-uuid>'), -- REC-01
+--   ('22222222-2222-4222-8222-222222222222', '<first-aider-uuid>', false, '<admin-uuid>'); -- OFF-01

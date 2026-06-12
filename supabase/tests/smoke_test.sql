@@ -141,10 +141,10 @@ select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000001
 do $$
 begin
   if (select count(*) from public.profiles) <> 5 then raise exception 'FAIL: admin should see all 5 profiles'; end if;
-  if (select count(*) from public.boxes) <> 2 then raise exception 'FAIL: admin should see both seeded boxes'; end if;
+  if (select count(*) from public.boxes) <> 23 then raise exception 'FAIL: admin should see all 23 seeded boxes'; end if;
   if (select count(*) from public.first_aid_kit_templates) <> 1 then raise exception 'FAIL: admin template visibility'; end if;
   if (select count(*) from public.first_aid_kit_template_items) <> 22 then raise exception 'FAIL: expected 22 template items'; end if;
-  if (select count(*) from public.box_items) <> 44 then raise exception 'FAIL: expected 22 box items in each of 2 boxes'; end if;
+  if (select count(*) from public.box_items) <> 506 then raise exception 'FAIL: expected 22 box items in each of 23 boxes'; end if;
   if (select count(*) from public.first_aid_usage_logs) <> 1 then raise exception 'FAIL: admin should read usage logs'; end if;
   if (select count(*) from public.reminder_logs) <> 1 then raise exception 'FAIL: admin should read reminder logs'; end if;
 end
@@ -210,7 +210,7 @@ end
 $$;
 
 -- =============================================================================
--- 4. FIRST AIDER (Fred, assigned to Warehouse box only)
+-- 4. FIRST AIDER (Fred, assigned to REC-01 only)
 -- =============================================================================
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000002', false);
 
@@ -411,7 +411,7 @@ end
 $$;
 
 -- =============================================================================
--- 5. SECOND FIRST AIDER (Farid: WH + PR) - multi-box, own-records-only
+-- 5. SECOND FIRST AIDER (Farid: REC-01 + OFF-01) - multi-box, own-records-only
 -- =============================================================================
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000005', false);
 
@@ -497,7 +497,7 @@ do $$
 declare
   n integer;
 begin
-  if (select count(*) from public.boxes) <> 3 then raise exception 'FAIL: viewer should see all 3 active boxes'; end if;
+  if (select count(*) from public.boxes) <> 24 then raise exception 'FAIL: viewer should see all 24 active boxes'; end if;
   if (select count(*) from public.inspections) <> 1 then raise exception 'FAIL: viewer should see all inspections'; end if;
   if (select count(*) from public.inspection_items) <> 1 then raise exception 'FAIL: viewer should see all inspection lines'; end if;
   if (select count(*) from public.topup_requests) <> 1 then raise exception 'FAIL: viewer should see all top-ups'; end if;
@@ -560,7 +560,7 @@ begin
   get diagnostics n = row_count;
   if n <> 1 then raise exception 'FAIL: admin could not complete the top-up request'; end if;
 
-  -- admin revokes Farid's PR assignment; his box visibility must shrink
+  -- admin revokes Farid's OFF-01 assignment; his box visibility must shrink
   update public.box_assignments
      set is_active = false
    where box_id = '22222222-2222-4222-8222-222222222222'

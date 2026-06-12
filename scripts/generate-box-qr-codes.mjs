@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://first-aid-box-inspection.vercel.app').replace(/\/+$/, '');
@@ -7,18 +7,39 @@ const outDir = path.join(process.cwd(), 'public', 'qr-codes', 'first-aid-boxes')
 const fallbackBoxes = [
   {
     id: '11111111-1111-4111-8111-111111111111',
-    code: 'FAB-WH-001',
-    name: 'Warehouse A First Aid Box',
-    area: 'Warehouse',
-    location: 'Warehouse A near forklift charging area',
+    code: 'REC-01',
+    name: 'REC-01 First Aid Box',
+    area: 'Office',
+    location: 'Reception',
   },
   {
     id: '22222222-2222-4222-8222-222222222222',
-    code: 'FAB-PR-001',
-    name: 'Production Line 1 First Aid Box',
-    area: 'Production',
-    location: 'Production hall, line 1, beside supervisor desk',
+    code: 'OFF-01',
+    name: 'OFF-01 First Aid Box',
+    area: 'Office',
+    location: 'Office 1st Floor, Near Lift',
   },
+  { id: 'b0000000-0000-4000-8000-000000000003', code: 'OFF-02', name: 'OFF-02 First Aid Box', area: 'Office', location: 'Office 1st Floor, Purchasing' },
+  { id: 'b0000000-0000-4000-8000-000000000004', code: 'OFF-03', name: 'OFF-03 First Aid Box', area: 'Office', location: 'Office 2nd Floor, Lift' },
+  { id: 'b0000000-0000-4000-8000-000000000005', code: 'OFF-04', name: 'OFF-04 First Aid Box', area: 'Office', location: 'Office 2nd Floor, AE' },
+  { id: 'b0000000-0000-4000-8000-000000000006', code: 'PRO-01', name: 'PRO-01 First Aid Box', area: 'Office', location: 'Production Office' },
+  { id: 'b0000000-0000-4000-8000-000000000007', code: 'LOA-01', name: 'LOA-01 First Aid Box', area: 'Production', location: 'Loading Area' },
+  { id: 'b0000000-0000-4000-8000-000000000008', code: 'VCB-01', name: 'VCB-01 First Aid Box', area: 'Production', location: 'VCB Entrance' },
+  { id: 'b0000000-0000-4000-8000-000000000009', code: 'RND-01', name: 'RND-01 First Aid Box', area: 'Production', location: 'R&D Entrance' },
+  { id: 'b0000000-0000-4000-8000-000000000010', code: 'RMU-01', name: 'RMU-01 First Aid Box', area: 'Production', location: 'RMU, Inside' },
+  { id: 'b0000000-0000-4000-8000-000000000011', code: 'GIS-01', name: 'GIS-01 First Aid Box', area: 'Production', location: 'GIS Walkway' },
+  { id: 'b0000000-0000-4000-8000-000000000012', code: 'WIR-01', name: 'WIR-01 First Aid Box', area: 'Production', location: 'Wire Harness Area' },
+  { id: 'b0000000-0000-4000-8000-000000000013', code: 'WIR-02', name: 'WIR-02 First Aid Box', area: 'Production', location: 'Wire Assembly' },
+  { id: 'b0000000-0000-4000-8000-000000000014', code: 'STO-01', name: 'STO-01 First Aid Box', area: 'Production', location: 'Store' },
+  { id: 'b0000000-0000-4000-8000-000000000015', code: 'STO-02', name: 'STO-02 First Aid Box', area: 'Production', location: 'Store Office' },
+  { id: 'b0000000-0000-4000-8000-000000000016', code: 'TES-01', name: 'TES-01 First Aid Box', area: 'Production', location: 'Testing Area' },
+  { id: 'b0000000-0000-4000-8000-000000000017', code: 'AIS-01', name: 'AIS-01 First Aid Box', area: 'Production', location: 'New AIS Assembly' },
+  { id: 'b0000000-0000-4000-8000-000000000018', code: 'AIS-02', name: 'AIS-02 First Aid Box', area: 'Production', location: 'AIS Testing' },
+  { id: 'b0000000-0000-4000-8000-000000000019', code: 'FAB-01', name: 'FAB-01 First Aid Box', area: 'Production', location: 'Fabrication Area' },
+  { id: 'b0000000-0000-4000-8000-000000000020', code: 'GUA-01', name: 'GUA-01 First Aid Box', area: 'External', location: 'Guard Post 2' },
+  { id: 'b0000000-0000-4000-8000-000000000021', code: 'GUA-02', name: 'GUA-02 First Aid Box', area: 'External', location: 'Guard Post 1' },
+  { id: 'b0000000-0000-4000-8000-000000000022', code: 'GIS-02', name: 'GIS-02 First Aid Box', area: 'Production', location: 'GIS, Inside' },
+  { id: 'b0000000-0000-4000-8000-000000000023', code: 'PAI-01', name: 'PAI-01 First Aid Box', area: 'Production', location: 'Paintshop' },
 ];
 
 const ECC_CODEWORDS_PER_BLOCK = [
@@ -45,6 +66,7 @@ const ECL = { index: 1, formatBits: 0 }; // Medium error correction.
 
 async function main() {
   await mkdir(outDir, { recursive: true });
+  await removeOldGeneratedSvgs();
   const boxes = await loadBoxes();
   const generated = [];
 
@@ -92,6 +114,12 @@ async function main() {
 
   for (const item of generated) {
     console.log(`${item.box} ${item.type}: public/qr-codes/first-aid-boxes/${item.fileName}`);
+  }
+}
+
+async function removeOldGeneratedSvgs() {
+  for (const fileName of await readdir(outDir)) {
+    if (fileName.endsWith('-qr.svg')) await unlink(path.join(outDir, fileName));
   }
 }
 
