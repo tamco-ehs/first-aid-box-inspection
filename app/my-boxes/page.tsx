@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/client/api.ts';
 import type { Me, MyBoxesResponse } from '@/lib/client/types.ts';
 import { RequireAuth } from '@/components/RequireAuth';
@@ -14,8 +15,23 @@ export default function MyBoxesPage() {
 }
 
 function MyBoxesInner({ me }: { me: Me }) {
+  const searchParams = useSearchParams();
+  const filter = searchParams.get('filter');
   const [data, setData] = useState<MyBoxesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const filteredBoxes = useMemo(() => {
+    const boxes = data?.boxes ?? [];
+    if (filter === 'overdue') return boxes.filter((box) => box.due_status === 'Overdue');
+    if (filter === 'due-this-month') {
+      const month = new Date().toISOString().slice(0, 7);
+      return boxes.filter((box) => box.next_due_date.startsWith(month));
+    }
+    return boxes;
+  }, [data, filter]);
+
+  const filterLabel =
+    filter === 'overdue' ? 'Overdue boxes' : filter === 'due-this-month' ? 'Boxes due this month' : null;
 
   useEffect(() => {
     api
@@ -56,10 +72,20 @@ function MyBoxesInner({ me }: { me: Me }) {
 
         {data && data.boxes.length > 0 && (
           <>
-            <p className="px-1 text-sm text-slate-500">
-              {data.count} box{data.count === 1 ? '' : 'es'} · overdue shown first
-            </p>
-            {data.boxes.map((box) => (
+            <div className="flex items-center justify-between gap-3 px-1 text-sm text-slate-500">
+              <p>
+                {filterLabel ?? `${data.count} box${data.count === 1 ? '' : 'es'}`} - overdue shown first
+              </p>
+              {filterLabel && (
+                <a href="/my-boxes" className="font-semibold text-brand">
+                  Show all
+                </a>
+              )}
+            </div>
+            {filteredBoxes.length === 0 && (
+              <div className="card p-8 text-center text-slate-500">No boxes match this dashboard link.</div>
+            )}
+            {filteredBoxes.map((box) => (
               <BoxCard key={box.box_id} box={box} />
             ))}
           </>

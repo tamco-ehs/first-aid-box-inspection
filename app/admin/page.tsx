@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { Me } from '@/lib/client/types.ts';
 import { RequireAuth } from '@/components/RequireAuth';
 import { AppHeader } from '@/components/AppHeader';
@@ -26,7 +27,14 @@ export default function AdminPage() {
 }
 
 function Admin({ me }: { me: Me }) {
-  const [tab, setTab] = useState<Tab>('boxes');
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get('tab');
+  const [tab, setTab] = useState<Tab>(() => (isTab(requestedTab) ? requestedTab : 'boxes'));
+
+  useEffect(() => {
+    if (isTab(requestedTab)) setTab(requestedTab);
+  }, [requestedTab]);
+
   return (
     <>
       <AppHeader title="Admin" subtitle={me.full_name} right={<EshNav role={me.role} />} />
@@ -51,4 +59,8 @@ function Admin({ me }: { me: Me }) {
       </main>
     </>
   );
+}
+
+function isTab(value: string | null): value is Tab {
+  return TABS.some(([key]) => key === value);
 }

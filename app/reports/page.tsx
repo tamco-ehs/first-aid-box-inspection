@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/client/api.ts';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import type { Me, ReportsResponse } from '@/lib/client/types.ts';
@@ -29,6 +29,7 @@ function Dashboard({ me }: { me: Me }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('inspections');
+  const reportsRef = useRef<HTMLDivElement | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [boxId, setBoxId] = useState('');
@@ -61,6 +62,11 @@ function Dashboard({ me }: { me: Me }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function openReportTab(nextTab: Tab) {
+    setTab(nextTab);
+    window.setTimeout(() => reportsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  }
+
   return (
     <>
       <AppHeader title="First Aid Readiness" subtitle={me.full_name} right={<EshNav role={me.role} />} />
@@ -79,7 +85,7 @@ function Dashboard({ me }: { me: Me }) {
 
         {data && !loading && (
           <>
-            <Cards d={data.dashboard} />
+            <Cards d={data.dashboard} canOpenAdmin={me.role === 'admin'} onOpenTab={openReportTab} />
 
             <div className="grid gap-4 lg:grid-cols-3">
               <section className="card p-4 lg:col-span-2">
@@ -150,7 +156,7 @@ function Dashboard({ me }: { me: Me }) {
               </div>
             </section>
 
-            <div className="flex flex-wrap gap-2">
+            <div ref={reportsRef} className="flex flex-wrap gap-2 scroll-mt-4">
               {(['inspections', 'actions', 'usage'] as Tab[]).map((t) => (
                 <button key={t} onClick={() => setTab(t)} className={`btn btn-md ${tab === t ? 'btn-primary' : 'btn-secondary'}`}>
                   {t[0]!.toUpperCase() + t.slice(1)}
@@ -168,20 +174,39 @@ function Dashboard({ me }: { me: Me }) {
   );
 }
 
-function Cards({ d }: { d: ReportsResponse['dashboard'] }) {
-  const cards: [string, number, 'ok' | 'warn' | 'bad' | 'neutral'][] = [
-    ['Due This Month', d.due_this_month, 'neutral'],
-    ['Overdue', d.overdue, d.overdue > 0 ? 'bad' : 'ok'],
-    ['Quick Check Issues', d.quick_check_issues, d.quick_check_issues > 0 ? 'warn' : 'ok'],
-    ['Seal Broken / Used', d.seal_broken_used, d.seal_broken_used > 0 ? 'warn' : 'ok'],
-    ['Expired Items', d.expired_items, d.expired_items > 0 ? 'bad' : 'ok'],
-    ['Expiring in 30 Days', d.expiring_30_days, d.expiring_30_days > 0 ? 'warn' : 'ok'],
-    ['Open Actions', d.open_actions, d.open_actions > 0 ? 'warn' : 'ok'],
+type CardTarget = { kind: 'href'; href: string } | { kind: 'tab'; tab: Tab };
+
+function Cards({
+  d,
+  canOpenAdmin,
+  onOpenTab,
+}: {
+  d: ReportsResponse['dashboard'];
+  canOpenAdmin: boolean;
+  onOpenTab: (tab: Tab) => void;
+}) {
+  const inventoryTarget: CardTarget = canOpenAdmin
+    ? { kind: 'href', href: '/admin?tab=box-items' }
+    : { kind: 'tab', tab: 'actions' };
+  const cards: Array<{
+    label: string;
+    value: number;
+    tone: 'ok' | 'warn' | 'bad' | 'neutral';
+    target: CardTarget;
+  }> = [
+    { label: 'Due This Month', value: d.due_this_month, tone: 'neutral', target: { kind: 'href', href: '/my-boxes?filter=due-this-month' } },
+    { label: 'Overdue', value: d.overdue, tone: d.overdue > 0 ? 'bad' : 'ok', target: { kind: 'href', href: '/my-boxes?filter=overdue' } },
+    { label: 'Quick Check Issues', value: d.quick_check_issues, tone: d.quick_check_issues > 0 ? 'warn' : 'ok', target: { kind: 'tab', tab: 'inspections' } },
+    { label: 'Seal Broken / Used', value: d.seal_broken_used, tone: d.seal_broken_used > 0 ? 'warn' : 'ok', target: { kind: 'tab', tab: 'inspections' } },
+    { label: 'Expired Items', value: d.expired_items, tone: d.expired_items > 0 ? 'bad' : 'ok', target: inventoryTarget },
+    { label: 'Expiring in 30 Days', value: d.expiring_30_days, tone: d.expiring_30_days > 0 ? 'warn' : 'ok', target: inventoryTarget },
+    { label: 'Open Actions', value: d.open_actions, tone: d.open_actions > 0 ? 'warn' : 'ok', target: { kind: 'href', href: '/actions' } },
   ];
   return (
     <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-      {cards.map(([label, value, tone]) => (
-        <div key={label} className="card p-3">
+      {cards.map(({ label, value, tone, target }) => {
+        const content = (
+          <>
           <p className="text-2xl font-bold tabular-nums">{value}</p>
           <p className="text-xs leading-tight text-slate-500">{label}</p>
           <span
@@ -189,8 +214,19 @@ function Cards({ d }: { d: ReportsResponse['dashboard'] }) {
               tone === 'ok' ? 'bg-emerald-400' : tone === 'warn' ? 'bg-amber-400' : tone === 'bad' ? 'bg-red-400' : 'bg-slate-300'
             }`}
           />
-        </div>
-      ))}
+          </>
+        );
+        const cls = 'card block w-full p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand/30';
+        return target.kind === 'href' ? (
+          <a key={label} href={target.href} className={cls}>
+            {content}
+          </a>
+        ) : (
+          <button key={label} type="button" onClick={() => onOpenTab(target.tab)} className={cls}>
+            {content}
+          </button>
+        );
+      })}
     </section>
   );
 }
