@@ -35,7 +35,8 @@ alter table public.inspections add constraint inspections_overall_status_check
 alter table public.inspection_items drop constraint if exists inspection_items_item_status_check;
 alter table public.inspection_items add constraint inspection_items_item_status_check
   check (item_status is null or item_status in
-         ('OK', 'Low Stock', 'Low Qty', 'Missing', 'Expired', 'Expiring Soon', 'Damaged', 'Not Applicable'));
+         ('OK', 'Low Stock', 'Low Qty', 'Missing', 'Expired', 'Expiring Soon', 'Damaged', 'Not Applicable'))
+  not valid;
 
 
 -- =============================================================================
