@@ -26,6 +26,22 @@ export function ItemCheckCard({
 }) {
   const set = (patch: Partial<ItemDraft>) => onChange({ ...value, ...patch });
   const status = value.status;
+  const setStatus = (nextStatus: ItemCheckStatus) => {
+    if (nextStatus === 'Low Qty') {
+      onChange({
+        status: nextStatus,
+        observed_quantity: value.observed_quantity ?? null,
+        new_expiry_date: null,
+        remark: value.remark ?? null,
+      });
+      return;
+    }
+    if (nextStatus === 'Missing') {
+      onChange({ status: nextStatus, observed_quantity: 0, new_expiry_date: null, remark: value.remark ?? null });
+      return;
+    }
+    onChange({ status: nextStatus, observed_quantity: null, new_expiry_date: null, remark: null });
+  };
 
   return (
     <div className="card p-4">
@@ -48,7 +64,7 @@ export function ItemCheckCard({
           <button
             key={o.value}
             type="button"
-            onClick={() => set({ status: o.value })}
+            onClick={() => setStatus(o.value)}
             aria-pressed={status === o.value}
             className={`choice ${status === o.value ? toneOn[o.tone] : ''}`}
           >
@@ -73,27 +89,12 @@ export function ItemCheckCard({
               }
             />
           </label>
-          <RemarkInput required value={value.remark} onChange={(v) => set({ remark: v })} />
+          <RemarkInput value={value.remark} onChange={(v) => set({ remark: v })} />
         </div>
       )}
 
       {status === 'Missing' && (
         <div className="mt-3">
-          <RemarkInput required value={value.remark} onChange={(v) => set({ remark: v })} />
-        </div>
-      )}
-
-      {status === 'Expired' && item.has_expiry && (
-        <div className="mt-3 space-y-2">
-          <label className="block">
-            <span className="label">New expiry date (only if already replaced)</span>
-            <input
-              type="date"
-              className="input"
-              value={value.new_expiry_date ?? ''}
-              onChange={(e) => set({ new_expiry_date: e.target.value || null })}
-            />
-          </label>
           <RemarkInput value={value.remark} onChange={(v) => set({ remark: v })} />
         </div>
       )}
@@ -104,17 +105,13 @@ export function ItemCheckCard({
 function RemarkInput({
   value,
   onChange,
-  required,
 }: {
   value?: string | null;
   onChange: (v: string | null) => void;
-  required?: boolean;
 }) {
   return (
     <label className="block">
-      <span className="label">
-        Remark {required && <span className="text-red-600">*</span>}
-      </span>
+      <span className="label">Remarks (optional)</span>
       <input
         type="text"
         className="input"

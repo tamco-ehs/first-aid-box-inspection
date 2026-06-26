@@ -25,6 +25,7 @@ interface SpecRow {
   required_quantity: number | null;
   unit: string | null;
   has_expiry: boolean;
+  expiry_date: string | null;
 }
 
 interface ActionInsert {
@@ -89,7 +90,7 @@ export async function POST(req: Request): Promise<Response> {
     if (itemCheckPerformed) {
       const { data: specs } = await admin
         .from('box_items_effective')
-        .select('id, item_name, required_quantity, unit, has_expiry')
+        .select('id, item_name, required_quantity, unit, has_expiry, expiry_date')
         .eq('box_id', body.box_id)
         .eq('is_active', true);
       specById = new Map(((specs ?? []) as SpecRow[]).map((s) => [s.id, s]));
@@ -124,29 +125,26 @@ export async function POST(req: Request): Promise<Response> {
       if (it.status === 'Expired' && !spec.has_expiry) {
         throw badRequest(`"${spec.item_name}": only items marked as expirable in the master list can be marked Expired.`);
       }
+      if (it.status === 'Low Qty' && it.observed_quantity == null) {
+        throw badRequest(`"${spec.item_name}": current quantity is required for Low Qty.`);
+      }
 
       const observed =
         it.status === 'Missing' ? 0 : it.status === 'OK' ? spec.required_quantity : it.observed_quantity ?? null;
-      const newExpiry = spec.has_expiry ? it.new_expiry_date ?? null : null;
+      const currentExpiry = spec.has_expiry ? spec.expiry_date ?? null : null;
 
       itemLines.push({
         box_item_id: spec.id,
         item_name: spec.item_name,
         required_quantity: spec.required_quantity,
         observed_quantity: observed,
-        expiry_date: newExpiry,
+        expiry_date: currentExpiry,
         item_status: it.status,
-        remarks: it.remark ?? null,
+        remarks: it.status === 'Expired' ? null : it.remark ?? null,
       });
 
       const mapped = itemActionType(it.status);
       if (mapped) {
-        if (it.status === 'Low Qty' && !it.remark) {
-          throw badRequest(`"${spec.item_name}": a remark is required for Low Qty.`);
-        }
-        if (it.status === 'Missing' && !it.remark) {
-          throw badRequest(`"${spec.item_name}": a remark is required for Missing.`);
-        }
         itemActions.push({
           action_type: mapped.action_type,
           category: 'item',
@@ -154,10 +152,10 @@ export async function POST(req: Request): Promise<Response> {
           item_name: spec.item_name,
           required_quantity: spec.required_quantity,
           observed_quantity: observed,
-          expiry_date: it.status === 'Expired' ? newExpiry : null,
-          new_expiry_date: newExpiry,
+          expiry_date: it.status === 'Expired' ? currentExpiry : null,
+          new_expiry_date: null,
           priority: mapped.priority,
-          details: it.remark ?? null,
+          details: it.status === 'Expired' ? null : it.remark ?? null,
         });
       }
 
@@ -168,7 +166,6 @@ export async function POST(req: Request): Promise<Response> {
         patch.current_quantity = it.observed_quantity;
       else if (it.status === 'OK' && spec.required_quantity != null)
         patch.current_quantity = spec.required_quantity;
-      if (spec.has_expiry && it.new_expiry_date) patch.expiry_date = it.new_expiry_date;
       if (Object.keys(patch).length > 0) boxItemUpdates.push({ id: spec.id, patch });
     }
 

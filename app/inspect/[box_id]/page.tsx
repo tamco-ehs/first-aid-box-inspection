@@ -121,9 +121,8 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
         if (!v?.status) return `Please check every item (e.g. ${it.item_name}).`;
         if (v.status === 'Expired' && !it.has_expiry)
           return `"${it.item_name}": only items marked as expirable in the master list can be marked Expired.`;
-        if (v.status === 'Low Qty' && (v.observed_quantity == null || !v.remark))
-          return `"${it.item_name}": enter current quantity and a remark.`;
-        if (v.status === 'Missing' && !v.remark) return `"${it.item_name}": a remark is required.`;
+        if (v.status === 'Low Qty' && v.observed_quantity == null)
+          return `"${it.item_name}": enter current quantity.`;
       }
     }
     return null;
@@ -152,9 +151,9 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
             return {
               box_item_id: it.box_item_id,
               status: v.status!,
-              observed_quantity: v.observed_quantity ?? null,
-              new_expiry_date: it.has_expiry ? v.new_expiry_date ?? null : null,
-              remark: v.remark ?? null,
+              observed_quantity: v.status === 'Missing' ? 0 : v.status === 'Low Qty' ? v.observed_quantity ?? null : null,
+              new_expiry_date: null,
+              remark: v.status === 'Expired' ? null : v.remark ?? null,
             };
           })
         : undefined;
