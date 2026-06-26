@@ -153,7 +153,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
               status: v.status!,
               observed_quantity: v.status === 'Missing' ? 0 : v.status === 'Low Qty' ? v.observed_quantity ?? null : null,
               new_expiry_date: null,
-              remark: v.status === 'Expired' ? null : v.remark ?? null,
+              remark: null,
             };
           })
         : undefined;

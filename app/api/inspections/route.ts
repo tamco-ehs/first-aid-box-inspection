@@ -140,7 +140,7 @@ export async function POST(req: Request): Promise<Response> {
         observed_quantity: observed,
         expiry_date: currentExpiry,
         item_status: it.status,
-        remarks: it.status === 'Expired' ? null : it.remark ?? null,
+        remarks: null,
       });
 
       const mapped = itemActionType(it.status);
@@ -155,7 +155,7 @@ export async function POST(req: Request): Promise<Response> {
           expiry_date: it.status === 'Expired' ? currentExpiry : null,
           new_expiry_date: null,
           priority: mapped.priority,
-          details: it.status === 'Expired' ? null : it.remark ?? null,
+          details: null,
         });
       }
 

@@ -32,12 +32,12 @@ export function ItemCheckCard({
         status: nextStatus,
         observed_quantity: value.observed_quantity ?? null,
         new_expiry_date: null,
-        remark: value.remark ?? null,
+        remark: null,
       });
       return;
     }
     if (nextStatus === 'Missing') {
-      onChange({ status: nextStatus, observed_quantity: 0, new_expiry_date: null, remark: value.remark ?? null });
+      onChange({ status: nextStatus, observed_quantity: 0, new_expiry_date: null, remark: null });
       return;
     }
     onChange({ status: nextStatus, observed_quantity: null, new_expiry_date: null, remark: null });
@@ -89,36 +89,8 @@ export function ItemCheckCard({
               }
             />
           </label>
-          <RemarkInput value={value.remark} onChange={(v) => set({ remark: v })} />
-        </div>
-      )}
-
-      {status === 'Missing' && (
-        <div className="mt-3">
-          <RemarkInput value={value.remark} onChange={(v) => set({ remark: v })} />
         </div>
       )}
     </div>
-  );
-}
-
-function RemarkInput({
-  value,
-  onChange,
-}: {
-  value?: string | null;
-  onChange: (v: string | null) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="label">Remarks (optional)</span>
-      <input
-        type="text"
-        className="input"
-        maxLength={1000}
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value || null)}
-      />
-    </label>
   );
 }
