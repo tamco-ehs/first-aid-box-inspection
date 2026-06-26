@@ -5,6 +5,7 @@ import { api } from '@/lib/client/api.ts';
 import type { Me, MyBoxesResponse } from '@/lib/client/types.ts';
 import { RequireAuth } from '@/components/RequireAuth';
 import { AppHeader } from '@/components/AppHeader';
+import { BottomNav } from '@/components/BottomNav';
 import { BoxCard } from '@/components/BoxCard';
 import { Spinner } from '@/components/Spinner';
 
@@ -31,12 +32,12 @@ function MyBoxesInner({ me }: { me: Me }) {
         right={
           me.role === 'admin' || me.role === 'viewer' ? (
             <a href="/reports" className="btn btn-ghost btn-md text-slate-600">
-              Reports
+              Dashboard
             </a>
           ) : undefined
         }
       />
-      <main className="mx-auto max-w-3xl space-y-3 p-4" data-tour="box-list">
+      <main className="mx-auto max-w-3xl space-y-3 p-4 pb-24">
         {error && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>
         )}
@@ -64,6 +65,7 @@ function MyBoxesInner({ me }: { me: Me }) {
           </>
         )}
       </main>
+      <BottomNav />
     </>
   );
 }

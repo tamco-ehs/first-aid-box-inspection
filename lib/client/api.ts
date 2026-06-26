@@ -5,10 +5,12 @@
 // ApiClientError carrying the server's clean { code, message }.
 
 import type {
-  InspectionResult,
+  ActionsResponse,
   InspectionTemplateResponse,
+  ItemCheckStatus,
   Me,
   MyBoxesResponse,
+  QuickInspectionResult,
   ReportsResponse,
   SignatureResponse,
 } from './types.ts';
@@ -53,25 +55,22 @@ function safeJson(text: string): unknown {
   }
 }
 
-export interface InspectionSubmitBody {
+export interface QuickInspectionBody {
   box_id: string;
-  inspector_name?: string | null;
-  inspector_department?: string | null;
+  box_accessible: boolean;
+  box_clean: boolean;
+  seal_intact: boolean;
+  contact_visible: boolean;
   notes?: string | null;
-  box_photo_url: string;
+  box_photo_url?: string | null;
   box_photo_cloudinary_public_id?: string | null;
   submitted_device?: string | null;
-  inspection_items: Array<{
+  item_check?: Array<{
     box_item_id: string;
+    status: ItemCheckStatus;
     observed_quantity?: number | null;
-    observed_volume_level?: string | null;
-    observed_present_status?: string | null;
-    expiry_date?: string | null;
-    expiry_validation_status?: string | null;
-    replacement_date?: string | null;
-    replacement_photo_url?: string | null;
-    replacement_photo_cloudinary_public_id?: string | null;
-    remarks?: string | null;
+    new_expiry_date?: string | null;
+    remark?: string | null;
   }>;
 }
 
@@ -85,22 +84,32 @@ export interface UsageSubmitBody {
   website?: string; // honeypot
 }
 
+export interface ActionCloseBody {
+  action_id: string;
+  closure_note?: string | null;
+  items?: Array<{
+    box_item_id: string;
+    after_refill_quantity?: number | null;
+    new_expiry_date?: string | null;
+  }>;
+}
+
 export const api = {
   me: () => request<Me>('/api/me'),
   myBoxes: () => request<MyBoxesResponse>('/api/my-boxes'),
   inspectionTemplate: (boxId: string) =>
-    request<InspectionTemplateResponse>(
-      `/api/boxes/${encodeURIComponent(boxId)}/inspection-template`,
-    ),
-  submitInspection: (body: InspectionSubmitBody) =>
-    request<InspectionResult>('/api/inspections', { method: 'POST', body: JSON.stringify(body) }),
+    request<InspectionTemplateResponse>(`/api/boxes/${encodeURIComponent(boxId)}/inspection-template`),
+  submitInspection: (body: QuickInspectionBody) =>
+    request<QuickInspectionResult>('/api/inspections', { method: 'POST', body: JSON.stringify(body) }),
   submitUsage: (body: UsageSubmitBody) =>
-    request<{ ok: boolean; message: string }>('/api/usage', {
+    request<{ ok: boolean; message: string }>('/api/usage', { method: 'POST', body: JSON.stringify(body) }),
+  reports: (query: string) => request<ReportsResponse>(`/api/reports${query ? `?${query}` : ''}`),
+  actions: (query: string) => request<ActionsResponse>(`/api/actions${query ? `?${query}` : ''}`),
+  closeAction: (body: ActionCloseBody) =>
+    request<{ ok: boolean; box_ready: boolean; updated_items: number }>('/api/actions/close', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  reports: (query: string) =>
-    request<ReportsResponse>(`/api/reports${query ? `?${query}` : ''}`),
   cloudinarySignature: (uploadType: 'inspection' | 'item_reference') =>
     request<SignatureResponse>('/api/cloudinary-signature', {
       method: 'POST',

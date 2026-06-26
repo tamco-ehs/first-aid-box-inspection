@@ -7,8 +7,9 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          DEFAULT: '#dc2626', // first-aid red
-          dark: '#b91c1c',
+          DEFAULT: '#16a34a', // ESH green
+          dark: '#15803d',
+          light: '#dcfce7',
         },
       },
       minHeight: {

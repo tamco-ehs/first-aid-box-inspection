@@ -27,8 +27,10 @@ const steps = [
   ['supabase/tests/local_shim.sql', 'local Supabase shim (roles + auth schema)'],
   ['supabase/schema.sql',           'schema: tables, constraints, triggers'],
   ['supabase/rls_policies.sql',     'RLS policies + privilege hardening'],
-  ['supabase/seed.sql',             'seed: baseline template, 22 items, 23 boxes'],
+  ['supabase/revamp.sql',           'revamp: actions table + quick-check columns'],
+  ['supabase/seed.sql',             'seed: baseline template, 22 items, 2 boxes'],
   ['supabase/tests/smoke_test.sql', 'RLS smoke tests (all roles, all tables)'],
+  ['supabase/tests/actions_test.sql', 'revamp smoke tests (actions RLS + code trigger)'],
 ];
 
 const db = new PGlite();

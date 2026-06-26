@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Spinner } from '@/components/Spinner';
 import { Badge } from '@/components/StatusBadge';
-import { APP_URL, Notice, Section, useAsync, type AdminBox, type TemplateRow } from './shared.tsx';
+import { QrCode } from '@/components/QrCode';
+import { absoluteUrl, isLocalHostUrl, Notice, Section, useAsync, type AdminBox, type TemplateRow } from './shared.tsx';
 
 export function BoxesAdmin() {
   const sb = getSupabaseBrowserClient();
@@ -53,8 +54,6 @@ export function BoxesAdmin() {
     </div>
   );
 }
-
-
 
 function NewBoxForm({
   templates,
@@ -171,8 +170,9 @@ function BoxRow({
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const inspectUrl = `${APP_URL}/inspect/${box.id}`;
-  const usageUrl = `${APP_URL}/usage?box=${box.id}&code=${encodeURIComponent(box.box_code)}`;
+  const inspectUrl = absoluteUrl(`/inspect/${box.id}`);
+  const usageUrl = absoluteUrl(`/usage?box=${box.id}&code=${encodeURIComponent(box.box_code)}`);
+  const localWarning = isLocalHostUrl(inspectUrl);
 
   async function save() {
     setBusy(true);
@@ -239,32 +239,33 @@ function BoxRow({
         </L>
       </div>
 
-      <div className="mt-3 space-y-1 rounded-lg bg-slate-50 p-3 text-xs">
-        <UrlRow label="Inspection link" url={inspectUrl} />
-        <UrlRow label="Usage QR link" url={usageUrl} />
-        <button
-          onClick={() => {
-            navigator.clipboard?.writeText(`Inspect: ${inspectUrl}\nUsage: ${usageUrl}`);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          }}
-          className="font-semibold text-brand"
-        >
-          {copied ? 'Copied!' : 'Copy both links'}
-        </button>
-      </div>
-
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <QrAssetCard
-          title="Inspection QR"
-          description="Print this for the monthly inspection record."
-          href={qrAssetPath(box.box_code, 'inspection')}
-        />
-        <QrAssetCard
-          title="Usage QR"
-          description="Print this near the box for item withdrawals."
-          href={qrAssetPath(box.box_code, 'usage')}
-        />
+      <div className="mt-3 rounded-lg bg-slate-50 p-3">
+        <p className="mb-2 text-sm font-semibold text-slate-700">QR codes</p>
+        {localWarning && (
+          <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            These QR codes point to a local/preview address, so a phone on another network
+            cannot open them. Set <code>NEXT_PUBLIC_APP_URL</code> to your real site URL (or open
+            this admin page on the deployed site) to get phone-scannable QR codes.
+          </p>
+        )}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <QrCode value={inspectUrl} label="Inspection (first aiders)" filename={`${box.box_code}-inspection-qr.png`} />
+          <QrCode value={usageUrl} label="Usage (anyone)" filename={`${box.box_code}-usage-qr.png`} />
+        </div>
+        <div className="mt-3 space-y-1 text-xs">
+          <UrlRow label="Inspection link" url={inspectUrl} />
+          <UrlRow label="Usage link" url={usageUrl} />
+          <button
+            onClick={() => {
+              navigator.clipboard?.writeText(`Inspect: ${inspectUrl}\nUsage: ${usageUrl}`);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }}
+            className="font-semibold text-brand"
+          >
+            {copied ? 'Copied!' : 'Copy both links'}
+          </button>
+        </div>
       </div>
 
       <div className="mt-3 flex gap-2">
@@ -279,44 +280,6 @@ function BoxRow({
   );
 }
 
-function QrAssetCard({
-  title,
-  description,
-  href,
-}: {
-  title: string;
-  description: string;
-  href: string;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3">
-      <div className="flex gap-3">
-        <a href={href} target="_blank" rel="noreferrer" className="block shrink-0" aria-label={`Open ${title}`}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={href}
-            alt=""
-            loading="lazy"
-            className="h-24 w-20 rounded-lg border border-slate-200 bg-slate-50 object-cover"
-          />
-        </a>
-        <div className="min-w-0 flex-1">
-          <h3 className="font-semibold">{title}</h3>
-          <p className="mt-1 text-sm text-slate-600">{description}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <a href={href} target="_blank" rel="noreferrer" className="btn btn-sm btn-secondary">
-              Open
-            </a>
-            <a href={href} download className="btn btn-sm btn-primary">
-              Download
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function UrlRow({ label, url }: { label: string; url: string }) {
   return (
     <div className="truncate">
@@ -324,14 +287,6 @@ function UrlRow({ label, url }: { label: string; url: string }) {
       <span className="font-mono">{url}</span>
     </div>
   );
-}
-
-function qrAssetPath(boxCode: string, type: 'inspection' | 'usage') {
-  return `/qr-codes/first-aid-boxes/${safeBoxCode(boxCode)}-${type}-qr.svg`;
-}
-
-function safeBoxCode(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
 function L({ label, children }: { label: string; children: React.ReactNode }) {

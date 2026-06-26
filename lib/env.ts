@@ -18,11 +18,6 @@ function optional(name: string, fallback: string): string {
   return v && v.trim() !== '' ? v : fallback;
 }
 
-function maybe(name: string): string | null {
-  const v = process.env[name];
-  return v && v.trim() !== '' ? v : null;
-}
-
 // --- Public (safe to expose to the browser) ----------------------------------
 export const PUBLIC_ENV = {
   supabaseUrl: () => required('NEXT_PUBLIC_SUPABASE_URL'),
@@ -36,7 +31,6 @@ export const SERVER_ENV = {
   supabaseServiceRoleKey: () => required('SUPABASE_SERVICE_ROLE_KEY'),
   cloudinaryApiKey: () => required('CLOUDINARY_API_KEY'),
   cloudinaryApiSecret: () => required('CLOUDINARY_API_SECRET'),
-  brevoApiKey: () => maybe('BREVO_API_KEY'),
   resendApiKey: () => required('RESEND_API_KEY'),
   reminderFromEmail: () => optional('REMINDER_FROM_EMAIL', 'First Aid Reminders <onboarding@resend.dev>'),
   adminNotificationEmail: () => process.env.ADMIN_NOTIFICATION_EMAIL?.trim() || null,

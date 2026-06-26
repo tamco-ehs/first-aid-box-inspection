@@ -1,6 +1,6 @@
 // POST /api/cloudinary-signature - hand the browser a short-lived signature so
 // it can upload directly to Cloudinary WITHOUT ever seeing the API secret.
-//   - inspection photos:     public QR inspection flow
+//   - inspection photos:     first_aider or admin
 //   - item reference photos: admin only
 // The upload folder is fixed server-side; the client cannot choose it.
 
@@ -15,6 +15,8 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request): Promise<Response> {
   return safe(async () => {
+    const ctx = await requireActive();
+
     const parsed = cloudinarySignatureSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) throw badRequest(firstZodMessage(parsed.error));
 
@@ -22,8 +24,9 @@ export async function POST(req: Request): Promise<Response> {
 
     // Authorize per upload type BEFORE issuing a signature.
     if (upload_type === 'item_reference') {
-      const ctx = await requireActive();
       requireRole(ctx, ['admin']);
+    } else {
+      requireRole(ctx, ['admin', 'first_aider']);
     }
 
     const folder = FOLDER_BY_UPLOAD_TYPE[upload_type];

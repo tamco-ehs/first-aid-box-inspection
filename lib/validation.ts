@@ -15,49 +15,65 @@ const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
 
-const volumeLevel = z.enum(['Full', 'Three Quarter', 'Half', 'Below Half', 'Empty']);
-const presentStatus = z.enum(['Present', 'Missing', 'Damaged']);
-const expiryValidationStatus = z.enum([
-  'matches_label',
-  'different_date',
-  'no_label',
-  'expired',
-  'replaced_now',
-  'missing_not_replaced',
-]);
-
-// --- POST /api/inspections ----------------------------------------------------
-export const inspectionItemInput = z
+// --- POST /api/inspections (quick inspection + conditional item check) --------
+export const itemCheckInput = z
   .object({
     box_item_id: uuid,
+    status: z.enum(['OK', 'Low Qty', 'Missing', 'Expired']),
     observed_quantity: z.number().min(0).max(100000).nullish(),
-    observed_volume_level: volumeLevel.nullish(),
-    observed_present_status: presentStatus.nullish(),
-    expiry_date: isoDate.nullish(),
-    expiry_validation_status: expiryValidationStatus.nullish(),
-    replacement_date: isoDate.nullish(),
-    replacement_photo_url: z.string().url().max(500).nullish(),
-    replacement_photo_cloudinary_public_id: z.string().max(200).nullish(),
-    remarks: z.string().trim().max(1000).nullish(),
+    new_expiry_date: isoDate.nullish(),
+    remark: z.string().trim().max(1000).nullish(),
   })
   .strict();
 
-export const inspectionSubmitSchema = z
+export const quickInspectionSchema = z
   .object({
     box_id: uuid,
-    // Accepted but ignored server-side: the DB trigger snapshots the real
-    // inspector identity from the profile (anti-spoofing). Kept for clients.
-    inspector_name: z.string().trim().max(120).nullish(),
-    inspector_department: z.string().trim().max(120).nullish(),
+    // The 4 quick-check answers (Yes = true).
+    box_accessible: z.boolean(),
+    box_clean: z.boolean(),
+    seal_intact: z.boolean(),
+    contact_visible: z.boolean(),
     notes: z.string().trim().max(2000).nullish(),
-    box_photo_url: z.string().url().max(500),
+    // Box photo is OPTIONAL in the revamped flow.
+    box_photo_url: z.string().url().max(500).nullish(),
     box_photo_cloudinary_public_id: z.string().max(200).nullish(),
     submitted_device: z.string().trim().max(120).nullish(),
-    inspection_items: z.array(inspectionItemInput).min(1).max(200),
+    // Present only when the item checklist was opened (seal broken / expiry).
+    item_check: z.array(itemCheckInput).max(200).optional(),
   })
   .strict();
 
-export type InspectionSubmit = z.infer<typeof inspectionSubmitSchema>;
+export type QuickInspectionSubmit = z.infer<typeof quickInspectionSchema>;
+
+// --- GET /api/actions ---------------------------------------------------------
+export const actionsQuerySchema = z
+  .object({
+    status: z.enum(['Open', 'In Progress', 'Closed', 'Rejected', 'all']).optional(),
+    box_id: uuid.optional(),
+    category: z.enum(['quick_check', 'item']).optional(),
+  })
+  .strict();
+
+// --- POST /api/actions/close (bulk close + update box items) ------------------
+export const actionCloseSchema = z
+  .object({
+    action_id: uuid,
+    closure_note: z.string().trim().max(1000).nullish(),
+    items: z
+      .array(
+        z
+          .object({
+            box_item_id: uuid,
+            after_refill_quantity: z.number().min(0).max(100000).nullish(),
+            new_expiry_date: isoDate.nullish(),
+          })
+          .strict(),
+      )
+      .max(200)
+      .optional(),
+  })
+  .strict();
 
 // --- POST /api/usage ----------------------------------------------------------
 export const usageSchema = z
@@ -110,12 +126,7 @@ export const reportsQuerySchema = z
     to: isoDate.optional(),
     box_id: uuid.optional(),
     area: z.string().trim().max(120).optional(),
-    inspector_id: uuid.optional(),
-    department: z.string().trim().max(120).optional(),
-    status: z.enum(['Pass', 'Fail', 'Needs Restock']).optional(),
-    issue_type: z
-      .enum(['expired', 'expiring_soon', 'missing', 'low_stock', 'damaged', 'topup'])
-      .optional(),
+    status: z.enum(['Ready', 'Action Required']).optional(),
   })
   .strict();
 

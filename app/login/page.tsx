@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getSupabaseBrowserClient, getSupabasePasswordResetClient } from '@/lib/supabase/client';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { api } from '@/lib/client/api.ts';
 import { takeIntendedPath } from '@/lib/client/intent.ts';
-import { CompanyLogo } from '@/components/CompanyLogo';
 import { Spinner, FullScreenLoader } from '@/components/Spinner';
 
 function friendlyAuthError(msg: string): string {
@@ -15,13 +14,6 @@ function friendlyAuthError(msg: string): string {
   return 'Could not sign in. Please try again.';
 }
 
-function friendlyResetLinkError(msg: string): string {
-  if (/expired|invalid/i.test(msg)) {
-    return 'This password reset link is expired or already used. Request a new reset email and open the newest link.';
-  }
-  return msg || 'The password reset link could not be used. Request a new reset email.';
-}
-
 export default function LoginPage() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
@@ -29,9 +21,6 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [resetSending, setResetSending] = useState(false);
-  const [noBox, setNoBox] = useState(false);
 
   // Decide where to send the user once authenticated.
   async function routeAfterAuth() {
@@ -52,45 +41,14 @@ export default function LoginPage() {
       return;
     }
 
-    if (me.role === 'admin') return router.replace('/admin');
-    if (me.role === 'viewer') return router.replace('/reports');
-
-    // first_aider -> assignment-based routing
-    const boxes = await api.myBoxes();
-    if (boxes.count === 0) {
-      setNoBox(true);
-      setChecking(false);
-      setSubmitting(false);
-      return;
-    }
-    if (boxes.count === 1) return router.replace(`/inspect/${boxes.boxes[0]!.box_id}`);
-    return router.replace('/my-boxes');
+    // ESH team (admin) + viewer land on the readiness dashboard; first aiders
+    // go to their home (which lists assigned boxes, including an empty state).
+    if (me.role === 'admin' || me.role === 'viewer') return router.replace('/reports');
+    return router.replace('/home');
   }
 
   // If already signed in, skip the form.
   useEffect(() => {
-    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-    const search = new URLSearchParams(window.location.search);
-    const hasAuthError = hash.has('error') || search.has('error');
-    const resetError = hash.get('error_description') ?? search.get('error_description');
-    const isRecoveryRedirect =
-      hash.get('type') === 'recovery' ||
-      search.get('type') === 'recovery' ||
-      hash.has('access_token') ||
-      search.has('code');
-
-    if (hasAuthError || resetError) {
-      setError(friendlyResetLinkError((resetError ?? '').replace(/\+/g, ' ')));
-      window.history.replaceState(null, '', '/login');
-      setChecking(false);
-      return;
-    }
-
-    if (isRecoveryRedirect) {
-      window.location.replace(`/reset-password${window.location.search}${window.location.hash}`);
-      return;
-    }
-
     let active = true;
     (async () => {
       try {
@@ -111,8 +69,6 @@ export default function LoginPage() {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
-    setNotice(null);
-    setNoBox(false);
 
     const { error: authError } = await getSupabaseBrowserClient().auth.signInWithPassword({
       email: email.trim(),
@@ -131,57 +87,11 @@ export default function LoginPage() {
     }
   }
 
-  async function sendPasswordReset() {
-    if (resetSending) return;
-    const targetEmail = email.trim();
-    if (!targetEmail) {
-      setError('Enter your email first, then click forgot password.');
-      return;
-    }
-
-    setResetSending(true);
-    setError(null);
-    setNotice(null);
-    const { error: resetError } = await getSupabasePasswordResetClient().auth.resetPasswordForEmail(
-      targetEmail,
-      {
-        redirectTo: `${window.location.origin}/reset-password`,
-      },
-    );
-
-    if (resetError) {
-      setError(resetError.message);
-    } else {
-      setNotice('Password reset email sent. Check your inbox and open the latest link.');
-    }
-    setResetSending(false);
-  }
-
   if (checking) return <FullScreenLoader label="Checking your session…" />;
-
-  if (noBox) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 p-6 text-center">
-        <div className="text-5xl">🧰</div>
-        <h1 className="text-xl font-bold">No box assigned</h1>
-        <p className="text-slate-600">No first aid box assigned to you. Please contact EHS/Admin.</p>
-        <button
-          onClick={async () => {
-            await getSupabaseBrowserClient().auth.signOut();
-            setNoBox(false);
-          }}
-          className="btn btn-lg btn-secondary"
-        >
-          Sign out
-        </button>
-      </main>
-    );
-  }
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-6">
       <div className="mb-8 text-center">
-        <CompanyLogo className="mx-auto mb-5 h-12 w-auto max-w-[220px]" />
         <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand text-3xl text-white">
           ✚
         </div>
@@ -217,22 +127,9 @@ export default function LoginPage() {
         {error && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>
         )}
-        {notice && (
-          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-            {notice}
-          </p>
-        )}
 
         <button type="submit" disabled={submitting} className="btn btn-lg btn-primary w-full">
           {submitting ? <Spinner className="h-5 w-5" /> : 'Sign in'}
-        </button>
-        <button
-          type="button"
-          onClick={sendPasswordReset}
-          disabled={resetSending}
-          className="w-full text-center text-sm font-semibold text-brand"
-        >
-          {resetSending ? 'Sending reset email...' : 'Forgot password?'}
         </button>
       </form>
 

@@ -16,14 +16,23 @@ at the database level with Row Level Security - not by hiding buttons.
 | **1** | Database schema, auth model, roles, RLS, checklist template, box assignments, seed data | **Done - all SQL verified by automated tests** |
 | **2** | Secure backend: API routes, inspection scoring + top-up automation, signed Cloudinary uploads, usage API, reporting API, reminder cron, no-index headers | **Done - logic tested, type-checked, production build passes** |
 | **3** | Mobile-first PWA: login + role routing, my-boxes, inspection with photo checklist cards + offline drafts, usage page, reports dashboard + CSV, full admin | **Done - type-checked, production build passes, UI render-verified** |
+| **v2** | ESH revamp: green theme, 4-question Quick Inspection that only opens the item checklist when needed, unified **actions** model, ESH dashboard + bulk **Close Action**, box readiness | **Done - SQL + logic tested, type-checked, build passes, UI render-verified** |
 
 ## Stack
 
 - **Framework:** Next.js 15 (App Router) + TypeScript + Tailwind CSS, hosted on Vercel
 - **Database / Auth:** Supabase Postgres + Supabase Auth (email login)
-- **Images:** Cloudinary (item reference photos + live inspection photos), signed server-side
-- **Email:** Brevo or Resend, triggered by Vercel Cron (`0 0 * * *` = 08:00 Malaysia)
+- **Images:** Cloudinary (item reference photos + optional live box photos), signed server-side
+- **Email:** Resend, triggered by Vercel Cron (`0 0 * * *` = 08:00 Malaysia)
 - **Mobile:** PWA (installable, offline app-shell, localStorage inspection drafts)
+- **QR codes:** `qrcode.react` (inspection + usage QR per box, in Admin)
+
+> **v2 workflow (current):** a first aider taps **Inspect**, answers 4 quick
+> questions, and is done — unless the **seal is broken** or an **item is
+> expired**, which auto-opens the simple item checklist (OK / Low Qty / Missing
+> / Expired). Every issue raises an **action** (code `FA-ACT-YYYY-NNNN`) for the
+> ESH team, who clear them on the bulk **Close Action** screen; the box returns
+> to **Ready** when no open actions remain. See the confirmation table below.
 
 ## Repository layout
 
@@ -67,7 +76,7 @@ tailwind.config.ts, postcss.config.mjs, vercel.json, .env.example
    project, run the three SQL files in order, create the first users, promote
    your admin.
 2. Copy `.env.example` to `.env.local` and fill in the keys (server-only
-   secrets stay out of `NEXT_PUBLIC_*`). Configure Cloudinary + Brevo/Resend.
+   secrets stay out of `NEXT_PUBLIC_*`). Configure Cloudinary + Resend.
 3. `npm install && npm run dev` and open http://localhost:3000 - you are routed
    to `/login`. Sign in to reach your boxes / reports / admin by role.
 4. Deploy to Vercel; set the same env vars; the cron runs daily automatically.
@@ -147,6 +156,28 @@ your Supabase/Cloudinary/Resend credentials in `.env.local`.
 
 See [docs/API.md](docs/API.md) for the full endpoint reference and the
 per-route authorization matrix.
+
+## Revamp (v2) confirmation checklist
+
+The new ESH quick-inspection workflow, mapped to the spec's expected flow:
+
+| Spec requirement | Result | Where |
+|---|---|---|
+| Home shows assigned boxes with simple status tags + one Inspect button | **Yes** | [/home](app/home/page.tsx), [BoxCard](components/BoxCard.tsx) (Issue Found / Overdue / Due Soon / Not Due) |
+| 4-question Quick Inspection (accessible / clean / seal / contact) | **Yes** | [/inspect/[box_id]](app/inspect/[box_id]/page.tsx) + [YesNo](components/YesNo.tsx) |
+| Item checklist opens ONLY when seal broken or item expired | **Yes** | `itemCheckRequired` ([logic/actions.ts](lib/logic/actions.ts)); unit-tested |
+| Item cards: OK / Low Qty / Missing / Expired with the right inputs | **Yes** | [ItemCheckCard](components/ItemCheckCard.tsx) |
+| Failed quick checks raise ESH actions (accessibility / condition / contact) | **Yes** | server `quickCheckActions`; [inspections route](app/api/inspections/route.ts) |
+| One "Save Item Check" then a review summary before final submit | **Yes** | review step in [/inspect/[box_id]](app/inspect/[box_id]/page.tsx) |
+| Dashboard: 7 cards + Needs Attention Today + compliance + trend | **Yes** | [/reports](app/reports/page.tsx) from [/api/reports](app/api/reports/route.ts) |
+| Bulk Close Action: Select Risk / All / Clear, preselected risk, qty/expiry badges, after-refill + new-expiry, closure note | **Yes** | [/actions/[id]](app/actions/[id]/page.tsx), [/api/actions/close](app/api/actions/close/route.ts) |
+| Closing updates items, records closed-by/at + note, recomputes box readiness | **Yes** | [/api/actions/close](app/api/actions/close/route.ts) |
+| First aider cannot edit master data or close actions | **Yes** | RLS (admin-only writes) + role guards |
+| Action codes `FA-ACT-YYYY-NNNN` | **Yes** | DB trigger ([revamp.sql](supabase/revamp.sql)); tested |
+
+Roles: **ESH Team = `admin`**, **First Aider = `first_aider`**, viewer =
+read-only. The box photo is now optional. The Phase 1 RLS suite still passes;
+the actions table adds 4 policies (39 total) and its own smoke test.
 
 ## Key design decisions
 

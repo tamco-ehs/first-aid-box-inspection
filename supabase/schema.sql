@@ -188,23 +188,6 @@ create table public.box_items (
                                    check (measurement_type in ('quantity', 'volume_level', 'present_absent')),
   has_expiry                       boolean not null default false,
   expiry_date                      date,
-  expiry_status                    text not null default 'No expiry date recorded'
-                                   check (expiry_status in
-                                          ('Valid', 'Expiring soon', 'Expired',
-                                           'No expiry date recorded', 'Expiry label mismatch')),
-  last_verified_date               timestamptz,
-  last_verified_by                 uuid references public.profiles (id) on delete set null,
-  last_replaced_date               date,
-  last_replaced_by                 uuid references public.profiles (id) on delete set null,
-  remarks                          text
-                                   check (remarks is null or char_length(remarks) <= 1000),
-  replacement_photo_url            text
-                                   check (replacement_photo_url is null
-                                          or (replacement_photo_url like 'https://res.cloudinary.com/%'
-                                              and char_length(replacement_photo_url) <= 500)),
-  replacement_photo_cloudinary_public_id text
-                                   check (replacement_photo_cloudinary_public_id is null
-                                          or char_length(replacement_photo_cloudinary_public_id) <= 200),
   current_quantity                 numeric
                                    check (current_quantity is null or current_quantity >= 0),
   current_volume_level             text
@@ -293,17 +276,9 @@ create table public.inspection_items (
                           check (observed_present_status is null or observed_present_status in
                                  ('Present', 'Missing', 'Damaged')),
   expiry_date             date,
-  system_expiry_date      date,
-  expiry_validation_status text
-                          check (expiry_validation_status is null or expiry_validation_status in
-                                 ('matches_label', 'different_date', 'no_label', 'expired',
-                                  'replaced_now', 'missing_not_replaced')),
-  expiry_label_mismatch   boolean not null default false,
-  no_expiry_date_recorded boolean not null default false,
   item_status             text
                           check (item_status is null or item_status in
-                                 ('OK', 'Low Stock', 'Missing', 'Expired', 'Expiring Soon',
-                                  'No Expiry Date', 'Expiry Label Mismatch', 'Damaged', 'Not Applicable')),
+                                 ('OK', 'Low Stock', 'Missing', 'Expired', 'Expiring Soon', 'Damaged', 'Not Applicable')),
   is_below_half           boolean not null default false,
   is_expired              boolean not null default false,
   expires_soon            boolean not null default false,
@@ -356,34 +331,7 @@ comment on table public.topup_requests is
 
 
 -- =============================================================================
--- J. EXPIRY_AUDIT_LOGS - per-box item expiry date change history
--- =============================================================================
-create table public.expiry_audit_logs (
-  id                    uuid primary key default gen_random_uuid(),
-  box_id                uuid not null references public.boxes (id) on delete cascade,
-  box_item_id           uuid not null references public.box_items (id) on delete cascade,
-  old_expiry_date       date,
-  new_expiry_date       date,
-  changed_by            uuid references public.profiles (id) on delete set null,
-  changed_at            timestamptz not null default now(),
-  reason                text check (reason is null or char_length(reason) <= 1000),
-  source                text not null
-                        check (source in ('replacement', 'inspection_correction', 'admin_correction')),
-  replacement_photo_url text
-                        check (replacement_photo_url is null
-                               or (replacement_photo_url like 'https://res.cloudinary.com/%'
-                                   and char_length(replacement_photo_url) <= 500)),
-  replacement_photo_cloudinary_public_id text
-                        check (replacement_photo_cloudinary_public_id is null
-                               or char_length(replacement_photo_cloudinary_public_id) <= 200)
-);
-
-comment on table public.expiry_audit_logs is
-  'Audit trail for box-level expiry date changes. The template only says whether expiry tracking is required; actual dates live on box_items.';
-
-
--- =============================================================================
--- K. FIRST_AID_USAGE_LOGS - "I took something from the box" records
+-- J. FIRST_AID_USAGE_LOGS - "I took something from the box" records
 -- =============================================================================
 create table public.first_aid_usage_logs (
   id             uuid primary key default gen_random_uuid(),
@@ -412,7 +360,7 @@ comment on column public.first_aid_usage_logs.client_ip_hash is
 
 
 -- =============================================================================
--- L. REMINDER_LOGS - reminder audit trail (prevents duplicate reminders)
+-- K. REMINDER_LOGS - reminder audit trail (prevents duplicate reminders)
 -- =============================================================================
 create table public.reminder_logs (
   id                 uuid primary key default gen_random_uuid(),
@@ -445,7 +393,6 @@ create index idx_boxes_template               on public.boxes (template_id);
 create index idx_box_assignments_profile      on public.box_assignments (profile_id) where is_active;
 create index idx_box_items_box                on public.box_items (box_id) where is_active;
 create index idx_box_items_template_item      on public.box_items (template_item_id);
-create index idx_box_items_expiry             on public.box_items (expiry_status, expiry_date) where is_active and has_expiry;
 create index idx_inspections_box_created      on public.inspections (box_id, created_at desc);
 create index idx_inspections_inspector        on public.inspections (inspector_id, created_at desc);
 create index idx_inspections_created          on public.inspections (created_at desc);
@@ -454,8 +401,6 @@ create index idx_inspection_items_box_item    on public.inspection_items (box_it
 create index idx_topups_box_requested         on public.topup_requests (box_id, requested_at desc);
 create index idx_topups_status                on public.topup_requests (status, requested_at desc);
 create index idx_topups_inspection            on public.topup_requests (inspection_id);
-create index idx_expiry_audit_box_item        on public.expiry_audit_logs (box_item_id, changed_at desc);
-create index idx_expiry_audit_box             on public.expiry_audit_logs (box_id, changed_at desc);
 create index idx_usage_logs_box_created       on public.first_aid_usage_logs (box_id, created_at desc);
 create index idx_usage_logs_created           on public.first_aid_usage_logs (created_at desc);
 create index idx_usage_logs_ip                on public.first_aid_usage_logs (client_ip_hash, created_at desc);
@@ -611,14 +556,6 @@ select
   bi.measurement_type,
   bi.has_expiry,
   bi.expiry_date,
-  bi.expiry_status,
-  bi.last_verified_date,
-  bi.last_verified_by,
-  bi.last_replaced_date,
-  bi.last_replaced_by,
-  bi.remarks,
-  bi.replacement_photo_url,
-  bi.replacement_photo_cloudinary_public_id,
   bi.current_quantity,
   bi.current_volume_level,
   bi.current_present_status,

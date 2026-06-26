@@ -3,7 +3,6 @@
 import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api, ApiClientError, type UsageSubmitBody } from '@/lib/client/api.ts';
-import { CompanyLogo } from '@/components/CompanyLogo';
 import { Spinner } from '@/components/Spinner';
 
 export default function UsagePage() {
@@ -103,7 +102,6 @@ function UsageInner() {
   return (
     <Shell>
       <div className="mb-4 text-center">
-        <CompanyLogo className="mx-auto mb-4 h-10 w-auto max-w-[190px]" />
         <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand text-2xl text-white">
           ✚
         </div>

@@ -1,37 +1,22 @@
 // Shapes returned by the API routes, used by the client pages. Kept in sync
 // with the route handlers by hand (no codegen).
 
-import type {
-  ActionType,
-  DueStatus,
-  ExpiryReminderStatus,
-  ExpiryValidationStatus,
-  FinalItemStatus,
-  ItemStatus,
-  MeasurementType,
-  OverallStatus,
-  Priority,
-  PresentStatus,
-  QuantityStatus,
-  Role,
-  VolumeLevel,
-} from '@/lib/logic/types.ts';
+import type { MeasurementType, Priority, Role } from '@/lib/logic/types.ts';
+import type { DueStatus, StatusTag } from '@/lib/logic/actions.ts';
 
-export type {
-  ActionType,
-  DueStatus,
-  ExpiryReminderStatus,
-  ExpiryValidationStatus,
-  FinalItemStatus,
-  ItemStatus,
-  MeasurementType,
-  OverallStatus,
-  Priority,
-  PresentStatus,
-  QuantityStatus,
-  Role,
-  VolumeLevel,
-};
+export type { MeasurementType, Priority, Role, DueStatus, StatusTag };
+
+export type ItemCheckStatus = 'OK' | 'Low Qty' | 'Missing' | 'Expired';
+
+export type ActionType =
+  | 'Box Accessibility Issue'
+  | 'Box Condition Issue'
+  | 'Emergency Contact Not Visible'
+  | 'Item Low Qty'
+  | 'Item Missing'
+  | 'Item Expired';
+
+export type ActionStatus = 'Open' | 'In Progress' | 'Closed' | 'Rejected';
 
 export interface Me {
   id: string;
@@ -59,13 +44,9 @@ export interface MyBox {
   next_due_date: string;
   due_status: DueStatus;
   days_overdue: number;
-  expiry_summary: {
-    expired: number;
-    expiring_30: number;
-    expiring_60: number;
-    missing_date: number;
-    mismatch: number;
-  };
+  open_actions: number;
+  status_tag: StatusTag;
+  primary_action: 'inspect' | 'view';
   assigned_inspectors: AssignedInspector[];
 }
 
@@ -86,12 +67,9 @@ export interface TemplateItem {
   expiry_warning_days: number | null;
   is_critical: boolean;
   current_quantity: number | null;
-  current_volume_level: VolumeLevel | null;
-  current_present_status: PresentStatus | null;
+  current_volume_level: string | null;
+  current_present_status: string | null;
   current_expiry_date: string | null;
-  expiry_status: ExpiryReminderStatus | null;
-  last_verified_date: string | null;
-  last_replaced_date: string | null;
   item_photo_url: string | null;
   display_order: number | null;
 }
@@ -105,67 +83,93 @@ export interface InspectionTemplateResponse {
     area: string | null;
     inspection_frequency_days: number;
   };
-  template: {
-    template_name: string;
-    guideline_reference: string | null;
-    description: string | null;
-  } | null;
+  template: { template_name: string; guideline_reference: string | null; description: string | null } | null;
   item_count: number;
   items: TemplateItem[];
   last_inspection: {
-    overall_status: OverallStatus;
+    overall_status: string;
     created_at: string;
     inspector_name: string;
     notes: string | null;
   } | null;
 }
 
-export interface InspectionResult {
+export interface CreatedAction {
+  action_code: string;
+  action_type: ActionType;
+  item_name: string | null;
+  priority: Priority;
+}
+
+export interface QuickInspectionResult {
   ok: boolean;
   inspection_id: string;
-  overall_status: OverallStatus;
-  summary: {
-    total: number;
-    ok: number;
-    low_stock: number;
-    missing: number;
-    damaged: number;
-    expired: number;
-    expiring_soon: number;
-    no_expiry_date_recorded: number;
-    expiry_label_mismatch: number;
-    topup_required: number;
-  };
-  topups_created: number;
-  topup_items: { item_name: string; priority: Priority; reason: string }[];
+  overall_status: 'Ready' | 'Action Required';
+  item_check_performed: boolean;
+  summary: { ok: number; low_qty: number; missing: number; expired: number; actions_created: number };
+  actions: CreatedAction[];
 }
 
-export interface SignatureResponse {
-  timestamp: number;
-  signature: string;
-  api_key: string;
-  cloud_name: string;
-  folder: string;
-  allowed_formats: string[];
+export interface BoxLite {
+  box_code: string;
+  box_name?: string;
+  location_description?: string;
+  area: string | null;
 }
 
-export interface DashboardSummary {
-  total_boxes: number;
-  boxes_inspected_this_month: number;
-  overdue_boxes: number;
-  boxes_needing_topup: number;
-  boxes_with_expired_items: number;
-  boxes_with_expiring_soon_items: number;
-  boxes_with_missing_expiry_dates: number;
-  boxes_with_expiry_label_mismatch: number;
-  items_expiring_within_30_days: number;
-  critical_now: number;
-  items_expired: number;
-  items_expiry_verification: number;
-  items_baseline_missing: number;
-  items_missing_photo: number;
-  open_topup_requests: number;
-  usage_logs_this_month: number;
+export interface ActionRow {
+  id: string;
+  action_code: string;
+  box_id: string;
+  inspection_id: string | null;
+  action_type: ActionType;
+  category: 'quick_check' | 'item';
+  box_item_id: string | null;
+  item_name: string | null;
+  required_quantity: number | null;
+  observed_quantity: number | null;
+  new_quantity: number | null;
+  expiry_date: string | null;
+  new_expiry_date: string | null;
+  priority: Priority | null;
+  status: ActionStatus;
+  details: string | null;
+  closure_note: string | null;
+  created_at: string;
+  closed_at: string | null;
+  boxes: BoxLite | null;
+}
+
+export interface ActionsResponse {
+  actions: ActionRow[];
+}
+
+export interface DashboardMetrics {
+  due_this_month: number;
+  overdue: number;
+  quick_check_issues: number;
+  seal_broken_used: number;
+  expired_items: number;
+  expiring_30_days: number;
+  open_actions: number;
+}
+
+export interface Compliance {
+  percent: number;
+  completed: number;
+  attention: number;
+  total: number;
+}
+
+export interface NeedsAttentionRow {
+  id: string;
+  action_code: string;
+  box_code: string;
+  location: string;
+  issue_type: ActionType;
+  item_name: string | null;
+  priority: Priority | null;
+  created_at: string;
 }
 
 export interface ReportInspection {
@@ -173,50 +177,12 @@ export interface ReportInspection {
   box_id: string;
   inspector_name: string;
   inspector_department: string | null;
-  overall_status: OverallStatus;
+  overall_status: string;
+  seal_intact: boolean | null;
+  item_check_performed: boolean;
   created_at: string;
   notes: string | null;
   boxes: { box_code: string; box_name: string; area: string | null } | null;
-}
-
-export interface ReportInspectionItem {
-  id: string;
-  inspection_id: string;
-  box_id: string | null;
-  boxes: { box_code: string; box_name: string; area: string | null } | null;
-  item_name: string;
-  required_quantity: number | null;
-  unit: string | null;
-  observed_quantity: number | null;
-  observed_volume_level: VolumeLevel | null;
-  observed_present_status: PresentStatus | null;
-  expiry_date: string | null;
-  system_expiry_date: string | null;
-  expiry_validation_status: ExpiryValidationStatus | null;
-  expiry_label_mismatch: boolean;
-  no_expiry_date_recorded: boolean;
-  item_status: ItemStatus | null;
-  is_expired: boolean;
-  expires_soon: boolean;
-  topup_required: boolean;
-  remarks: string | null;
-}
-
-export interface ReportTopup {
-  id: string;
-  box_id: string;
-  item_name: string;
-  item_photo_url: string | null;
-  reason: string | null;
-  required_quantity: number | null;
-  observed_quantity: number | null;
-  observed_volume_level: VolumeLevel | null;
-  expiry_date: string | null;
-  unit: string | null;
-  priority: Priority | null;
-  status: 'Open' | 'In Progress' | 'Completed' | 'Rejected';
-  requested_at: string;
-  completed_at: string | null;
 }
 
 export interface ReportUsage {
@@ -230,22 +196,22 @@ export interface ReportUsage {
   created_at: string;
 }
 
-export interface ReportExpiryItem {
-  id: string;
-  box_id: string;
-  item_name: string;
-  expiry_date: string | null;
-  expiry_status: ExpiryReminderStatus;
-  last_verified_date: string | null;
-  last_replaced_date: string | null;
-}
-
 export interface ReportsResponse {
   filters: Record<string, string>;
-  dashboard: DashboardSummary;
+  dashboard: DashboardMetrics;
+  compliance: Compliance;
+  needs_attention: NeedsAttentionRow[];
+  trend: { label: string; count: number }[];
   inspections: ReportInspection[];
-  inspection_items: ReportInspectionItem[];
-  expiry_items: ReportExpiryItem[];
-  topup_requests: ReportTopup[];
+  actions: ActionRow[];
   usage_logs: ReportUsage[];
+}
+
+export interface SignatureResponse {
+  timestamp: number;
+  signature: string;
+  api_key: string;
+  cloud_name: string;
+  folder: string;
+  allowed_formats: string[];
 }

@@ -16,8 +16,6 @@ export type ItemStatus =
   | 'Missing'
   | 'Expired'
   | 'Expiring Soon'
-  | 'No Expiry Date'
-  | 'Expiry Label Mismatch'
   | 'Damaged'
   | 'Not Applicable';
 
@@ -33,90 +31,13 @@ export type RestockThresholdType =
   | 'any_missing'
   | 'expired_only';
 
-export type ExpiryValidationStatus =
-  | 'matches_label'
-  | 'different_date'
-  | 'no_label'
-  | 'expired'
-  | 'replaced_now'
-  | 'missing_not_replaced';
-
-export type ExpiryReminderStatus =
-  | 'Valid'
-  | 'Expiring soon'
-  | 'Expired'
-  | 'No expiry date recorded'
-  | 'Expiry label mismatch';
-
-export type ExpiryAuditSource = 'replacement' | 'inspection_correction' | 'admin_correction';
-
-// --- Three-layer item status (the inspection form's mental model) -------------
-// Kept internal/derived; nothing new is persisted. `item_status` (above) is the
-// stored enum for inspection_items; `final_item_status` is what the UI badge
-// shows so an expiry-tracked item is never "OK" until expiry is verified.
-
-/** Layer A - what the physical stock looks like. */
-export type ConditionStatus =
-  | 'pending'
-  | 'full'
-  | 'half'
-  | 'empty'
-  | 'available'
-  | 'missing'
-  | 'damaged';
-
-/** Layer B - the expiry picture for this item. */
-export type ItemExpiryState =
-  | 'not_required'
-  | 'valid'
-  | 'expiring_soon'
-  | 'expired'
-  | 'not_recorded'
-  | 'no_label'
-  | 'mismatch'
-  | 'pending_verification';
-
-/** Layer C - the single badge-facing verdict (condition + expiry combined). */
-export type FinalItemStatus =
-  | 'pending'
-  | 'ok'
-  | 'ok_quantity_updated'
-  | 'incomplete'
-  | 'expiry_baseline_missing'
-  | 'topup_required'
-  | 'replacement_required'
-  | 'issue_found';
-
-/** Quantity verdict for count-based items (drives top-up vs OK-updated). */
-export type QuantityStatus =
-  | 'not_required'
-  | 'unchanged_ok'
-  | 'ok_quantity_updated'
-  | 'below_required'
-  | 'missing'
-  | 'pending';
-
-/** The single action an item needs - shared by inspection, email and dashboard. */
-export type ActionType =
-  | 'no_action'
-  | 'topup_required'
-  | 'replacement_required'
-  | 'expiring_soon'
-  | 'expiry_verification_required'
-  | 'expiry_baseline_missing'
-  | 'admin_review_required'
-  | 'immediate_action';
-
 /** The expected setup of one item in a box (from box_items joined with template). */
 export interface BoxItemSpec {
   box_item_id: string;
   item_name: string;
   measurement_type: MeasurementType;
   required_quantity: number | null;
-  /** Last saved box-level quantity (lets us tell "still OK" from "qty changed"). */
-  previous_quantity?: number | null;
   has_expiry: boolean;
-  current_expiry_date?: string | null;
   expiry_warning_days: number | null;
   is_critical: boolean;
   restock_threshold_type: RestockThresholdType | null;
@@ -129,10 +50,6 @@ export interface Observation {
   observed_volume_level?: VolumeLevel | null;
   observed_present_status?: PresentStatus | null;
   expiry_date?: string | null; // 'YYYY-MM-DD'
-  expiry_validation_status?: ExpiryValidationStatus | null;
-  replacement_date?: string | null; // 'YYYY-MM-DD'
-  replacement_photo_url?: string | null;
-  replacement_photo_cloudinary_public_id?: string | null;
   remarks?: string | null;
 }
 
@@ -146,19 +63,7 @@ export interface EvaluatedItem {
   observed_volume_level: VolumeLevel | null;
   observed_present_status: PresentStatus | null;
   expiry_date: string | null;
-  system_expiry_date: string | null;
-  expiry_validation_status: ExpiryValidationStatus | null;
-  expiry_label_mismatch: boolean;
-  no_expiry_date_recorded: boolean;
   item_status: ItemStatus;
-  // Derived three-layer view (not persisted; drives the form UI + email):
-  condition_status: ConditionStatus;
-  expiry_state: ItemExpiryState;
-  expiry_verified: boolean;
-  quantity_status: QuantityStatus;
-  topup_quantity: number | null;
-  action_type: ActionType;
-  final_item_status: FinalItemStatus;
   is_below_half: boolean;
   is_expired: boolean;
   expires_soon: boolean;

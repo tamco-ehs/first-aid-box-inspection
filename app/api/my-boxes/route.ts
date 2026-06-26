@@ -7,6 +7,7 @@ import { getAssignedBoxIds, requireActive } from '@/lib/auth';
 import { jsonOk, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { compareByDue, computeDue } from '@/lib/logic/due.ts';
+import { primaryAction, statusTag } from '@/lib/logic/actions.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -58,36 +59,6 @@ export async function GET(): Promise<Response> {
 
     const boxIds = boxes.map((b) => b.id);
 
-    const today = now.toISOString().slice(0, 10);
-    const in30 = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
-    const in60 = new Date(now.getTime() + 60 * 86_400_000).toISOString().slice(0, 10);
-    const { data: expiryData } = await admin
-      .from('box_items')
-      .select('box_id, expiry_date, expiry_status')
-      .in('box_id', boxIds)
-      .eq('is_active', true)
-      .eq('has_expiry', true);
-
-    const expiryByBox = new Map<
-      string,
-      { expired: number; expiring_30: number; expiring_60: number; missing_date: number; mismatch: number }
-    >();
-    for (const r of (expiryData ?? []) as { box_id: string; expiry_date: string | null; expiry_status: string | null }[]) {
-      const s = expiryByBox.get(r.box_id) ?? {
-        expired: 0,
-        expiring_30: 0,
-        expiring_60: 0,
-        missing_date: 0,
-        mismatch: 0,
-      };
-      if (r.expiry_status === 'Expiry label mismatch') s.mismatch += 1;
-      if (!r.expiry_date || r.expiry_status === 'No expiry date recorded') s.missing_date += 1;
-      else if (r.expiry_date < today) s.expired += 1;
-      else if (r.expiry_date <= in30) s.expiring_30 += 1;
-      else if (r.expiry_date <= in60) s.expiring_60 += 1;
-      expiryByBox.set(r.box_id, s);
-    }
-
     // Latest inspection date per box (one pass over desc-ordered rows).
     const { data: inspData } = await admin
       .from('inspections')
@@ -98,6 +69,17 @@ export async function GET(): Promise<Response> {
     const lastInspectionByBox = new Map<string, string>();
     for (const row of (inspData ?? []) as { box_id: string; created_at: string }[]) {
       if (!lastInspectionByBox.has(row.box_id)) lastInspectionByBox.set(row.box_id, row.created_at);
+    }
+
+    // Open actions per box drive the "Issue Found" badge + readiness.
+    const { data: openActs } = await admin
+      .from('actions')
+      .select('box_id')
+      .in('box_id', boxIds)
+      .in('status', ['Open', 'In Progress']);
+    const openByBox = new Map<string, number>();
+    for (const a of (openActs ?? []) as { box_id: string }[]) {
+      openByBox.set(a.box_id, (openByBox.get(a.box_id) ?? 0) + 1);
     }
 
     // Active assignments -> assigned inspectors per box.
@@ -130,6 +112,8 @@ export async function GET(): Promise<Response> {
         frequencyDays: b.inspection_frequency_days,
         now,
       });
+      const openActions = openByBox.get(b.id) ?? 0;
+      const tag = statusTag(openActions, due.due_status);
       return {
         box_id: b.id,
         box_code: b.box_code,
@@ -140,18 +124,20 @@ export async function GET(): Promise<Response> {
         next_due_date: due.next_due_date,
         due_status: due.due_status,
         days_overdue: due.days_overdue,
-        expiry_summary: expiryByBox.get(b.id) ?? {
-          expired: 0,
-          expiring_30: 0,
-          expiring_60: 0,
-          missing_date: 0,
-          mismatch: 0,
-        },
+        open_actions: openActions,
+        status_tag: tag,
+        primary_action: primaryAction(tag),
         assigned_inspectors: inspectorsByBox.get(b.id) ?? [],
       };
     });
 
-    result.sort(compareByDue);
+    // Issue boxes first, then by due urgency.
+    result.sort((a, b) => {
+      const ai = a.status_tag === 'Issue Found' ? 0 : 1;
+      const bi = b.status_tag === 'Issue Found' ? 0 : 1;
+      if (ai !== bi) return ai - bi;
+      return compareByDue(a, b);
+    });
 
     return jsonOk({ role: ctx.profile.role, count: result.length, boxes: result });
   });

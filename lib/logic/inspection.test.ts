@@ -37,20 +37,18 @@ test('quantity at 100% is OK', () => {
   assert.equal(r.is_below_half, false);
 });
 
-test('quantity at half of required is Low Stock + below half + topup (High)', () => {
+test('quantity exactly at 50% is Low Stock + below half + topup', () => {
   const r = evalOne(spec({ required_quantity: 30 }), { observed_quantity: 15 });
   assert.equal(r.item_status, 'Low Stock');
   assert.equal(r.is_below_half, true);
   assert.equal(r.topup_required, true);
-  assert.equal(r.priority, 'High'); // below the required minimum -> High
+  assert.equal(r.priority, 'Medium');
 });
 
-test('quantity below required (any shortfall) is Top-up required, not OK', () => {
+test('quantity just above 50% is OK', () => {
   const r = evalOne(spec({ required_quantity: 30 }), { observed_quantity: 16 });
-  assert.equal(r.item_status, 'Low Stock');
-  assert.equal(r.topup_required, true);
-  assert.equal(r.final_item_status, 'topup_required');
-  assert.equal(r.quantity_status, 'below_required');
+  assert.equal(r.item_status, 'OK');
+  assert.equal(r.topup_required, false);
 });
 
 test('quantity 0 is Missing + topup', () => {
@@ -60,16 +58,13 @@ test('quantity 0 is Missing + topup', () => {
   assert.equal(r.priority, 'High');
 });
 
-test('quantity req 9 / prev 9 / current 8 -> below required, top up 1, High', () => {
-  const r = evalOne(spec({ required_quantity: 9, previous_quantity: 9 }), {
-    observed_quantity: 8,
-    remarks: 'Used one.',
-  });
-  assert.equal(r.quantity_status, 'below_required');
-  assert.equal(r.final_item_status, 'topup_required');
-  assert.equal(r.topup_quantity, 1);
-  assert.equal(r.action_type, 'topup_required');
-  assert.equal(r.priority, 'High');
+test('fixed_quantity threshold can trigger low stock above 50%', () => {
+  const r = evalOne(
+    spec({ required_quantity: 30, restock_threshold_type: 'fixed_quantity', restock_threshold_quantity: 20 }),
+    { observed_quantity: 18 },
+  );
+  assert.equal(r.item_status, 'Low Stock');
+  assert.equal(r.topup_required, true);
 });
 
 // --- Volume levels: Half / Below Half / Empty are flagged --------------------
@@ -209,230 +204,21 @@ test('validateObservation requires the right field per measurement type', () => 
   );
 });
 
-test('validateObservation requires expiry validation when has_expiry', () => {
+test('validateObservation requires a valid expiry date when has_expiry', () => {
   assert.match(
-    validateObservation(spec({ has_expiry: true }), { observed_quantity: 30 }) ?? '',
-    /expiry check is required/,
+    validateObservation(spec({ has_expiry: true }), { observed_quantity: 1 }) ?? '',
+    /expiry date is required/,
   );
   assert.match(
-    validateObservation(spec({ has_expiry: true }), { observed_quantity: 30, expiry_date: '2026-13-40' }) ?? '',
+    validateObservation(spec({ has_expiry: true }), { observed_quantity: 1, expiry_date: '2026-13-40' }) ?? '',
     /valid YYYY-MM-DD/,
   );
   assert.equal(
-    validateObservation(spec({ has_expiry: true }), { observed_quantity: 30, expiry_date: '2026-12-01' }),
-    null,
-  );
-});
-
-test('monthly expiry validation can use the stored box item date', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: '2026-12-01' });
-  assert.equal(
-    validateObservation(s, { observed_quantity: 30, expiry_validation_status: 'matches_label' }),
-    null,
-  );
-  const r = evalOne(s, { observed_quantity: 30, expiry_validation_status: 'matches_label' });
-  assert.equal(r.expiry_date, '2026-12-01');
-  assert.equal(r.item_status, 'OK');
-});
-
-test('expiry mismatch requires a corrected date and remarks', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: '2026-12-01' });
-  assert.match(
-    validateObservation(s, { observed_quantity: 1, expiry_validation_status: 'different_date', expiry_date: '2026-11-01' }) ?? '',
-    /remarks are required/,
-  );
-  assert.equal(
-    validateObservation(s, {
-      observed_quantity: 1,
-      expiry_validation_status: 'different_date',
-      expiry_date: '2026-11-01',
-      remarks: 'Physical label is different.',
-    }),
-    null,
-  );
-});
-
-test('no expiry label is an issue without replacing the stored date', () => {
-  const r = evalOne(spec({ has_expiry: true, current_expiry_date: '2026-12-01' }), {
-    observed_quantity: 30,
-    expiry_validation_status: 'no_label',
-    remarks: 'Label missing.',
-  });
-  assert.equal(r.expiry_date, '2026-12-01');
-  assert.equal(r.item_status, 'Expiry Label Mismatch');
-  assert.equal(r.expiry_label_mismatch, true);
-  assert.equal(r.topup_required, true);
-});
-
-test('replaced item requires replacement date and new expiry date', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: '2026-01-01' });
-  assert.match(
-    validateObservation(s, { observed_quantity: 1, expiry_validation_status: 'replaced_now', expiry_date: '2027-01-01' }) ?? '',
-    /replacement date is required/,
-  );
-  assert.equal(
-    validateObservation(s, {
-      observed_quantity: 1,
-      expiry_validation_status: 'replaced_now',
-      expiry_date: '2027-01-01',
-      replacement_date: '2026-06-10',
-      remarks: 'Replaced during inspection.',
-    }),
+    validateObservation(spec({ has_expiry: true }), { observed_quantity: 1, expiry_date: '2026-12-01' }),
     null,
   );
 });
 
 test('negative quantity is rejected', () => {
   assert.match(validateObservation(spec(), { observed_quantity: -1 }) ?? '', />= 0/);
-});
-
-// --- final_item_status: the 8 acceptance scenarios ---------------------------
-test('scenario 1: saved date + Still OK (matches_label) -> final ok', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: '2026-12-01' });
-  const r = evalOne(s, { observed_quantity: 30, expiry_validation_status: 'matches_label' });
-  assert.equal(r.expiry_verified, true);
-  assert.equal(r.final_item_status, 'ok');
-  assert.equal(r.expiry_date, '2026-12-01');
-});
-
-test('scenario 2: no saved date + record expiry date -> ok, not a mismatch, no remarks', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: null });
-  const o: Observation = {
-    observed_quantity: 30,
-    expiry_validation_status: 'different_date',
-    expiry_date: '2027-01-01',
-  };
-  assert.equal(validateObservation(s, o), null); // baseline record needs no remarks
-  const r = evalOne(s, o);
-  assert.equal(r.final_item_status, 'ok');
-  assert.equal(r.expiry_label_mismatch, false);
-  assert.equal(r.expiry_date, '2027-01-01');
-});
-
-test('scenario 3: no saved date + cannot find label -> issue_found, date untouched', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: null });
-  const r = evalOne(s, { observed_quantity: 30, expiry_validation_status: 'no_label', remarks: 'No label.' });
-  assert.equal(r.final_item_status, 'issue_found');
-  assert.equal(r.expiry_date, null);
-  assert.equal(r.item_status, 'Expiry Label Mismatch');
-});
-
-test('scenario 4: saved date + label different -> corrected ok, remarks required', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: '2026-12-01' });
-  assert.match(
-    validateObservation(s, {
-      observed_quantity: 1,
-      expiry_validation_status: 'different_date',
-      expiry_date: '2026-11-01',
-    }) ?? '',
-    /remarks are required/,
-  );
-  const r = evalOne(s, {
-    observed_quantity: 30,
-    expiry_validation_status: 'different_date',
-    expiry_date: '2026-11-01',
-    remarks: 'Physical label differs.',
-  });
-  assert.equal(r.expiry_label_mismatch, true);
-  assert.equal(r.final_item_status, 'ok');
-  assert.equal(r.expiry_date, '2026-11-01');
-});
-
-test('scenario 5: saved date already expired -> replacement_required + remarks required', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: '2026-01-01' });
-  assert.match(
-    validateObservation(s, { observed_quantity: 30, expiry_validation_status: 'matches_label' }) ?? '',
-    /remarks are required/,
-  );
-  const r = evalOne(s, {
-    observed_quantity: 30,
-    expiry_validation_status: 'matches_label',
-    remarks: 'Confirmed expired.',
-  });
-  assert.equal(r.is_expired, true);
-  assert.equal(r.final_item_status, 'replacement_required');
-});
-
-test('scenario 6: replaced now -> ok with new date + replacement recorded', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: '2026-01-01' });
-  const o: Observation = {
-    observed_quantity: 30,
-    expiry_validation_status: 'replaced_now',
-    expiry_date: '2027-06-01',
-    replacement_date: '2026-06-10',
-    remarks: 'Replaced during inspection.',
-  };
-  assert.equal(validateObservation(s, o), null);
-  const r = evalOne(s, o);
-  assert.equal(r.final_item_status, 'ok');
-  assert.equal(r.expiry_date, '2027-06-01');
-});
-
-test('scenario 7: half -> topup_required, empty -> issue_found', () => {
-  const half = evalOne(spec({ measurement_type: 'volume_level' }), { observed_volume_level: 'Half' });
-  assert.equal(half.final_item_status, 'topup_required');
-  const empty = evalOne(spec({ measurement_type: 'volume_level' }), {
-    observed_volume_level: 'Empty',
-    remarks: 'Empty.',
-  });
-  assert.equal(empty.final_item_status, 'issue_found');
-});
-
-test('scenario 8: has_expiry + condition set but expiry NOT verified -> incomplete, never ok', () => {
-  const s = spec({ has_expiry: true, current_expiry_date: '2026-12-01' });
-  const r = evalOne(s, { observed_quantity: 30 }); // Full condition, no expiry choice yet
-  assert.equal(r.expiry_verified, false);
-  assert.equal(r.final_item_status, 'incomplete');
-  assert.notEqual(r.final_item_status, 'ok');
-});
-
-test('non-expiry acceptable item -> final ok', () => {
-  assert.equal(evalOne(spec(), { observed_quantity: 30 }).final_item_status, 'ok');
-  assert.equal(
-    evalOne(spec({ measurement_type: 'present_absent' }), { observed_present_status: 'Present' }).final_item_status,
-    'ok',
-  );
-});
-
-// --- Phase 1: quantity status + action mapping ------------------------------
-test('quantity req 5 / prev 9 / current 8 -> OK quantity updated, no top-up', () => {
-  const r = evalOne(spec({ required_quantity: 5, previous_quantity: 9 }), { observed_quantity: 8 });
-  assert.equal(r.quantity_status, 'ok_quantity_updated');
-  assert.equal(r.final_item_status, 'ok_quantity_updated');
-  assert.equal(r.topup_required, false);
-  assert.equal(r.action_type, 'no_action');
-});
-
-test('quantity unchanged at/above required -> OK (unchanged)', () => {
-  const r = evalOne(spec({ required_quantity: 5, previous_quantity: 8 }), { observed_quantity: 8 });
-  assert.equal(r.quantity_status, 'unchanged_ok');
-  assert.equal(r.final_item_status, 'ok');
-});
-
-test('quantity 0 -> missing / replacement required', () => {
-  const r = evalOne(spec({ required_quantity: 9, previous_quantity: 9 }), { observed_quantity: 0 });
-  assert.equal(r.quantity_status, 'missing');
-  assert.equal(r.item_status, 'Missing');
-  assert.equal(r.action_type, 'replacement_required');
-});
-
-test('expiry-tracked item with no saved date and no choice -> baseline missing', () => {
-  const r = evalOne(spec({ has_expiry: true, current_expiry_date: null }), { observed_quantity: 30 });
-  assert.equal(r.final_item_status, 'expiry_baseline_missing');
-  assert.equal(r.action_type, 'expiry_baseline_missing');
-});
-
-test('quantity below required requires remarks; updated-but-acceptable does not', () => {
-  assert.match(
-    validateObservation(spec({ required_quantity: 9 }), { observed_quantity: 8 }) ?? '',
-    /remarks are required/,
-  );
-  assert.equal(
-    validateObservation(spec({ required_quantity: 9 }), { observed_quantity: 8, remarks: 'Used one.' }),
-    null,
-  );
-  assert.equal(
-    validateObservation(spec({ required_quantity: 5, previous_quantity: 9 }), { observed_quantity: 8 }),
-    null,
-  );
 });

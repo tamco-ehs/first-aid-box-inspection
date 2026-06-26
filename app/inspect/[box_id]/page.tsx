@@ -1,96 +1,55 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { api, ApiClientError, type InspectionSubmitBody } from '@/lib/client/api.ts';
-import type {
-  FinalItemStatus,
-  InspectionResult,
-  InspectionTemplateResponse,
-  Me,
-  TemplateItem,
-} from '@/lib/client/types.ts';
-import { clearDraft, loadDraft, saveDraft, type DraftObservation } from '@/lib/client/draft.ts';
-import { hasObservation, toSpec } from '@/lib/client/inspect-helpers.ts';
-import { evaluateItem, validateObservation } from '@/lib/logic/inspection.ts';
-import { computeDue } from '@/lib/logic/due.ts';
-import { formatDate } from '@/lib/client/format.ts';
-import { AccessBlocked } from '@/components/RequireAuth';
+import { api, ApiClientError, type QuickInspectionBody } from '@/lib/client/api.ts';
+import type { InspectionTemplateResponse, Me, QuickInspectionResult } from '@/lib/client/types.ts';
+import {
+  clearDraft,
+  emptyDraft,
+  loadDraft,
+  saveDraft,
+  type ItemDraft,
+  type QuickDraft,
+} from '@/lib/client/draft.ts';
+import { itemCheckRequired } from '@/lib/logic/actions.ts';
+import { formatDate, todayIso } from '@/lib/client/format.ts';
+import { RequireAuth, AccessBlocked } from '@/components/RequireAuth';
 import { AppHeader } from '@/components/AppHeader';
-import { ChecklistCard } from '@/components/ChecklistCard';
-import { CompanyLogo } from '@/components/CompanyLogo';
+import { YesNo } from '@/components/YesNo';
+import { ItemCheckCard } from '@/components/ItemCheckCard';
 import { PhotoCapture } from '@/components/PhotoCapture';
 import { Spinner, FullScreenLoader } from '@/components/Spinner';
-import { Badge, DueBadge, OverallBadge, PriorityBadge } from '@/components/StatusBadge';
+import { Badge, PriorityBadge, ReadinessBadge } from '@/components/StatusBadge';
+
+const QUESTIONS = [
+  { key: 'box_accessible', label: 'Box accessible?' },
+  { key: 'box_clean', label: 'Box clean and not damaged?' },
+  { key: 'seal_intact', label: 'Seal intact / no sign of use?' },
+  { key: 'contact_visible', label: 'Emergency contact visible?' },
+] as const;
 
 export default function InspectPage() {
   const params = useParams<{ box_id: string }>();
-  const boxId = params.box_id;
-  return <Inspect boxId={boxId} />;
+  return (
+    <RequireAuth roles={['admin', 'first_aider']}>
+      {(me) => <Inspect me={me} boxId={params.box_id} />}
+    </RequireAuth>
+  );
 }
 
-type LoadError = { type: 'forbidden' | 'notfound' | 'other'; message: string };
-type InspectionPhase = 'confirm' | 'items' | 'review';
-type ActiveSheet = 'details' | 'items' | null;
-type StepDirection = 'forward' | 'backward';
-type FlowStatus = 'Pending' | 'Completed' | 'Issue found';
-type ValidationIssue = { message: string; itemIndex: number | null };
+type Step = 'form' | 'review';
+type LoadErr = { type: 'forbidden' | 'notfound' | 'other'; message: string };
 
-interface ItemReview {
-  status: FlowStatus;
-  final: FinalItemStatus;
-  label: string;
-  detail: string | null;
-  tone: 'neutral' | 'ok' | 'warn';
-  topupRequired: boolean;
-  expired: boolean;
-  expiringSoon: boolean;
-  noExpiryDateRecorded: boolean;
-  expiryLabelMismatch: boolean;
-  missing: boolean;
-  hasRemarks: boolean;
-}
-
-function Inspect({ boxId }: { boxId: string }) {
-  const now = useMemo(() => new Date(), []);
-  const [me, setMe] = useState<Me | null>(null);
+function Inspect({ me, boxId }: { me: Me; boxId: string }) {
   const [tpl, setTpl] = useState<InspectionTemplateResponse | null>(null);
-  const [loadError, setLoadError] = useState<LoadError | null>(null);
-
-  const [phase, setPhase] = useState<InspectionPhase>('confirm');
-  const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
-  const [obs, setObs] = useState<Record<string, DraftObservation>>({});
-  const [notes, setNotes] = useState('');
+  const [loadErr, setLoadErr] = useState<LoadErr | null>(null);
+  const [draft, setDraft] = useState<QuickDraft>(() => emptyDraft(boxId));
+  const [step, setStep] = useState<Step>('form');
   const [photo, setPhoto] = useState<{ url: string; publicId: string } | null>(null);
-
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [result, setResult] = useState<InspectionResult | null>(null);
-  const [draftRestored, setDraftRestored] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [lastEditedItemId, setLastEditedItemId] = useState<string | null>(null);
-  const [stepDirection, setStepDirection] = useState<StepDirection>('forward');
-  const [inspectorName, setInspectorName] = useState('');
-  const [inspectorDepartment, setInspectorDepartment] = useState('');
-
-  useEffect(() => {
-    let active = true;
-    api
-      .me()
-      .then((m) => {
-        if (!active || !m.is_active) return;
-        setMe(m);
-        setInspectorName((current) => current || m.full_name);
-        setInspectorDepartment((current) => current || m.department || '');
-      })
-      .catch(() => {
-        // QR inspections are allowed without login. A 401 here just means the
-        // inspector will enter their name manually for the audit record.
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const [result, setResult] = useState<QuickInspectionResult | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -99,22 +58,15 @@ function Inspect({ boxId }: { boxId: string }) {
         const t = await api.inspectionTemplate(boxId);
         if (!active) return;
         setTpl(t);
-        const d = loadDraft(boxId);
-        if (d) {
-          setObs(d.observations ?? {});
-          setNotes(d.notes ?? '');
-          if (d.photoUrl && d.photoPublicId) setPhoto({ url: d.photoUrl, publicId: d.photoPublicId });
-          setDraftRestored(true);
-        }
+        const saved = loadDraft(boxId);
+        if (saved) setDraft(saved);
       } catch (err) {
         if (!active) return;
         if (err instanceof ApiClientError) {
-          if (err.status === 403) setLoadError({ type: 'forbidden', message: err.message });
-          else if (err.status === 404) setLoadError({ type: 'notfound', message: err.message });
-          else setLoadError({ type: 'other', message: err.message });
-        } else {
-          setLoadError({ type: 'other', message: 'Could not load the checklist.' });
-        }
+          if (err.status === 403) setLoadErr({ type: 'forbidden', message: err.message });
+          else if (err.status === 404) setLoadErr({ type: 'notfound', message: err.message });
+          else setLoadErr({ type: 'other', message: err.message });
+        } else setLoadErr({ type: 'other', message: 'Could not load the box.' });
       }
     })();
     return () => {
@@ -122,698 +74,333 @@ function Inspect({ boxId }: { boxId: string }) {
     };
   }, [boxId]);
 
+  // autosave draft
   useEffect(() => {
-    if (!tpl || result) return;
-    saveDraft({
-      boxId,
-      updatedAt: Date.now(),
-      notes,
-      observations: obs,
-      photoUrl: photo?.url ?? null,
-      photoPublicId: photo?.publicId ?? null,
-    });
-  }, [obs, notes, photo, tpl, result, boxId]);
+    if (tpl && !result) saveDraft(draft);
+  }, [draft, tpl, result]);
 
-  useEffect(() => {
-    if (!tpl) return;
-    if (currentIndex >= tpl.items.length) setCurrentIndex(Math.max(0, tpl.items.length - 1));
-  }, [tpl, currentIndex]);
+  const today = todayIso();
+  const hasKnownExpired = useMemo(
+    () =>
+      (tpl?.items ?? []).some(
+        (i) => i.has_expiry && i.current_expiry_date != null && i.current_expiry_date < today,
+      ),
+    [tpl, today],
+  );
 
-  useEffect(() => {
-    if (!tpl || !lastEditedItemId || phase !== 'items') return;
-    const item = tpl.items[currentIndex];
-    if (!item || item.box_item_id !== lastEditedItemId || currentIndex >= tpl.items.length - 1) return;
-    if (getItemValidationError(item, obs[item.box_item_id] ?? {})) return;
-
-    const timer = window.setTimeout(() => {
-      setStepDirection('forward');
-      setCurrentIndex((idx) => (idx === currentIndex ? Math.min(idx + 1, tpl.items.length - 1) : idx));
-      setLastEditedItemId(null);
-      setSubmitError(null);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 600);
-
-    return () => window.clearTimeout(timer);
-  }, [tpl, phase, currentIndex, obs, lastEditedItemId]);
-
-  if (loadError?.type === 'forbidden') {
+  if (loadErr?.type === 'forbidden')
     return <AccessBlocked message="You are not assigned to this first aid box." />;
-  }
-  if (loadError?.type === 'notfound') {
+  if (loadErr?.type === 'notfound')
     return <AccessBlocked message="This first aid box was not found or is inactive." />;
-  }
-  if (loadError) {
-    return <AccessBlocked message={loadError.message} />;
-  }
-  if (!tpl) return <FullScreenLoader label="Loading checklist..." />;
+  if (loadErr) return <AccessBlocked message={loadErr.message} />;
+  if (!tpl) return <FullScreenLoader label="Loading box…" />;
+  if (result) return <ResultView result={result} tpl={tpl} />;
 
-  if (result) {
-    return <ResultView result={result} tpl={tpl} isSignedIn={Boolean(me)} />;
-  }
+  const a = draft.answers;
+  const allAnswered = QUESTIONS.every((q) => a[q.key] !== null);
+  // Item checklist opens only when the seal is broken or an item is expired.
+  const needItems = itemCheckRequired(a.seal_intact !== false, hasKnownExpired);
 
-  function getBaseValidationError(item: TemplateItem, value: DraftObservation): string | null {
-    if (!hasObservation(item, value)) {
-      return 'Please select Still OK & Next or Issue / Change before continuing.';
-    }
-    return validateObservation(toSpec(item), value);
-  }
+  const setAnswer = (key: (typeof QUESTIONS)[number]['key'], v: boolean) =>
+    setDraft((d) => ({ ...d, answers: { ...d.answers, [key]: v } }));
+  const setItem = (id: string, next: ItemDraft) =>
+    setDraft((d) => ({ ...d, items: { ...d.items, [id]: next } }));
 
-  function getItemReview(item: TemplateItem, value: DraftObservation): ItemReview {
-    const hasRemarks = Boolean(value.remarks?.trim());
-    if (!hasObservation(item, value)) {
-      return {
-        status: 'Pending',
-        final: 'pending',
-        label: 'Pending',
-        detail: null,
-        tone: 'neutral',
-        topupRequired: false,
-        expired: false,
-        expiringSoon: false,
-        noExpiryDateRecorded: false,
-        expiryLabelMismatch: false,
-        missing: false,
-        hasRemarks,
-      };
-    }
-
-    const evaluated = evaluateItem(toSpec(item), value, now);
-    const final = evaluated.final_item_status;
-    const issue = final === 'issue_found' || final === 'replacement_required' || final === 'topup_required';
-    const completed = final === 'ok' || final === 'ok_quantity_updated';
-    const status: FlowStatus = issue ? 'Issue found' : completed ? 'Completed' : 'Pending';
-    const detail =
-      final === 'incomplete'
-        ? 'Needs expiry check'
-        : final === 'expiry_baseline_missing'
-          ? 'Record expiry date'
-          : final === 'ok_quantity_updated'
-            ? 'Quantity updated'
-            : issue
-              ? evaluated.item_status
-              : null;
-
-    return {
-      status,
-      final,
-      label: status,
-      detail,
-      tone: issue ? 'warn' : completed ? 'ok' : 'neutral',
-      topupRequired: evaluated.topup_required,
-      expired: evaluated.is_expired,
-      expiringSoon: evaluated.expires_soon,
-      noExpiryDateRecorded: evaluated.no_expiry_date_recorded,
-      expiryLabelMismatch: evaluated.expiry_label_mismatch,
-      missing: evaluated.item_status === 'Missing',
-      hasRemarks,
-    };
+  function markRemainingOk() {
+    setDraft((d) => {
+      const items = { ...d.items };
+      for (const it of tpl!.items) {
+        if (!items[it.box_item_id]?.status) items[it.box_item_id] = { ...items[it.box_item_id], status: 'OK' };
+      }
+      return { ...d, items };
+    });
   }
 
-  function getItemValidationError(item: TemplateItem, value: DraftObservation): string | null {
-    // validateObservation (inside getBaseValidationError) is authoritative for
-    // required fields AND required remarks, so no extra check is needed here.
-    return getBaseValidationError(item, value);
-  }
-
-  function findItemValidationIssue(): ValidationIssue | null {
-    for (let i = 0; i < tpl!.items.length; i += 1) {
-      const it = tpl!.items[i]!;
-      const err = getItemValidationError(it, obs[it.box_item_id] ?? {});
-      if (err) return { message: err, itemIndex: i };
+  function validate(): string | null {
+    if (!allAnswered) return 'Please answer all 4 questions.';
+    if (needItems) {
+      for (const it of tpl!.items) {
+        const v = draft.items[it.box_item_id];
+        if (!v?.status) return `Please check every item (e.g. ${it.item_name}).`;
+        if (v.status === 'Low Qty' && (v.observed_quantity == null || !v.remark))
+          return `"${it.item_name}": enter current quantity and a remark.`;
+        if (v.status === 'Missing' && !v.remark) return `"${it.item_name}": a remark is required.`;
+      }
     }
     return null;
   }
 
-  function findSubmissionValidationIssue(): ValidationIssue | null {
-    const itemIssue = findItemValidationIssue();
-    if (itemIssue) return itemIssue;
-    if (!photo) return { message: 'Please take a live photo of the first aid box.', itemIndex: null };
-    return null;
-  }
-
-  function showValidationIssue(issue: ValidationIssue): void {
-    if (issue.itemIndex !== null) {
-      setPhase('items');
-      setStepDirection(issue.itemIndex >= currentIndex ? 'forward' : 'backward');
-      setCurrentIndex(issue.itemIndex);
-    } else {
-      setPhase('review');
-    }
-    setActiveSheet(null);
-    setLastEditedItemId(null);
-    setSubmitError(issue.message);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  function clearCurrentDraft(): void {
-    clearDraft(boxId);
-    setObs({});
-    setNotes('');
-    setPhoto(null);
-    setCurrentIndex(0);
-    setLastEditedItemId(null);
-    setStepDirection('forward');
-    setDraftRestored(false);
-    setSubmitError(null);
-  }
-
-  function startInspection(): void {
-    if (!me && inspectorName.trim().length < 2) {
-      setSubmitError('Please enter your name before starting the inspection.');
-      return;
-    }
-    setPhase('items');
-    setSubmitError(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  function goToItem(index: number): void {
-    const nextIndex = Math.min(Math.max(index, 0), tpl!.items.length - 1);
-    setPhase('items');
-    if (nextIndex !== currentIndex) {
-      setStepDirection(nextIndex > currentIndex ? 'forward' : 'backward');
-      setCurrentIndex(nextIndex);
-    }
-    setLastEditedItemId(null);
-    setSubmitError(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  function openReview(): void {
-    const issue = findItemValidationIssue();
-    if (issue) {
-      showValidationIssue(issue);
-      return;
-    }
-    setPhase('review');
-    setActiveSheet(null);
-    setSubmitError(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  function nextItem(): void {
-    const item = tpl!.items[currentIndex]!;
-    const err = getItemValidationError(item, obs[item.box_item_id] ?? {});
+  function goReview() {
+    const err = validate();
     if (err) {
-      showValidationIssue({ message: err, itemIndex: currentIndex });
+      setSubmitError(err);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-    if (currentIndex >= tpl!.items.length - 1) {
-      openReview();
-      return;
-    }
-    goToItem(currentIndex + 1);
-  }
-
-  // Passive value edits (typing a quantity/date, remarks, or picking an expiry
-  // option that needs a follow-up date) update the draft but must NOT auto-
-  // advance - that made the date field jump straight to the next item. Advancing
-  // is requested explicitly via completeCurrentItem (a decisive "tap and move on").
-  function setCurrentItem(next: DraftObservation): void {
-    const item = tpl!.items[currentIndex]!;
-    setObs((p) => ({ ...p, [item.box_item_id]: next }));
-    setLastEditedItemId(null);
     setSubmitError(null);
-  }
-
-  function completeCurrentItem(): void {
-    const item = tpl!.items[currentIndex]!;
-    setLastEditedItemId(item.box_item_id);
+    setStep('review');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   async function submit() {
     if (submitting) return;
-    const issue = findSubmissionValidationIssue();
-    if (issue) {
-      showValidationIssue(issue);
-      return;
-    }
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const body: InspectionSubmitBody = {
+      const item_check = needItems
+        ? tpl!.items.map((it) => {
+            const v = draft.items[it.box_item_id]!;
+            return {
+              box_item_id: it.box_item_id,
+              status: v.status!,
+              observed_quantity: v.observed_quantity ?? null,
+              new_expiry_date: v.new_expiry_date ?? null,
+              remark: v.remark ?? null,
+            };
+          })
+        : undefined;
+      const body: QuickInspectionBody = {
         box_id: boxId,
-        notes: notes.trim() || null,
-        box_photo_url: photo!.url,
-        box_photo_cloudinary_public_id: photo!.publicId,
+        box_accessible: a.box_accessible!,
+        box_clean: a.box_clean!,
+        seal_intact: a.seal_intact!,
+        contact_visible: a.contact_visible!,
+        notes: draft.notes.trim() || null,
+        box_photo_url: photo?.url ?? null,
+        box_photo_cloudinary_public_id: photo?.publicId ?? null,
         submitted_device: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 120) : null,
-        inspector_name: me?.full_name ?? inspectorName.trim(),
-        inspector_department: (me?.department ?? inspectorDepartment.trim()) || null,
-        inspection_items: tpl!.items.map((it) => {
-          const o = obs[it.box_item_id] ?? {};
-          return {
-            box_item_id: it.box_item_id,
-            observed_quantity: o.observed_quantity ?? null,
-            observed_volume_level: o.observed_volume_level ?? null,
-            observed_present_status: o.observed_present_status ?? null,
-            expiry_date: o.expiry_date ?? null,
-            expiry_validation_status:
-              o.expiry_validation_status ??
-              (o.expiry_quick_option === 'no_label'
-                ? 'no_label'
-                : o.expiry_quick_option === 'expired'
-                  ? 'expired'
-                  : null),
-            replacement_date: o.replacement_date ?? null,
-            replacement_photo_url: o.replacement_photo_url ?? null,
-            replacement_photo_cloudinary_public_id: o.replacement_photo_cloudinary_public_id ?? null,
-            remarks: o.remarks ?? null,
-          };
-        }),
+        item_check,
       };
       const res = await api.submitInspection(body);
       clearDraft(boxId);
       setResult(res);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
-      const localIssue = findSubmissionValidationIssue();
-      if (localIssue) {
-        showValidationIssue(localIssue);
-        return;
-      }
-      setSubmitError(e instanceof Error ? e.message : 'Submission failed. Your draft is saved - please retry.');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setSubmitError(e instanceof Error ? e.message : 'Submission failed. Your draft is saved — retry.');
+      setStep('form');
     } finally {
       setSubmitting(false);
     }
   }
 
-  const itemReviews = tpl.items.map((it) => getItemReview(it, obs[it.box_item_id] ?? {}));
-  const itemValidationErrors = tpl.items.map((it) => getItemValidationError(it, obs[it.box_item_id] ?? {}));
-  const completedCount = itemReviews.filter((r) => r.status === 'Completed').length;
-  const issueCount = itemReviews.filter((r) => r.status === 'Issue found').length;
-  const checkedCount = completedCount + issueCount;
-  const pendingCount = itemReviews.filter((r) => r.status === 'Pending').length;
-  const topupCount = itemReviews.filter((r) => r.topupRequired).length;
-  const expiredCount = itemReviews.filter((r) => r.expired).length;
-  const expiringSoonCount = itemReviews.filter((r) => r.expiringSoon).length;
-  const noExpiryDateCount = itemReviews.filter((r) => r.noExpiryDateRecorded).length;
-  const expiryMismatchCount = itemReviews.filter((r) => r.expiryLabelMismatch).length;
-  const missingCount = itemReviews.filter((r) => r.missing).length;
-  const okCount = itemReviews.filter((r) => r.final === 'ok').length;
-  const okQtyUpdatedCount = itemReviews.filter((r) => r.final === 'ok_quantity_updated').length;
-  const replacementCount = itemReviews.filter((r) => r.final === 'replacement_required').length;
-  const labelIssueCount = itemReviews.filter((r) => r.expiryLabelMismatch || r.noExpiryDateRecorded).length;
-  const remarksOrIssueCount = tpl.items.filter((it, i) => itemReviews[i]!.status === 'Issue found' || obs[it.box_item_id]?.remarks?.trim()).length;
-  const progressPercent = Math.round((checkedCount / Math.max(1, tpl.items.length)) * 100);
-  const currentItem = tpl.items[currentIndex] ?? tpl.items[0]!;
-  const currentChecked = hasObservation(currentItem, obs[currentItem.box_item_id] ?? {});
-  const shortLocation = tpl.box.area || tpl.box.box_name;
-  const guidanceNote =
-    tpl.template?.guideline_reference ||
-    tpl.template?.description ||
-    'Confirm this is the correct first aid box before starting the inspection.';
-  const due = tpl.last_inspection
-    ? computeDue({
-        lastInspectionAt: tpl.last_inspection.created_at,
-        boxCreatedAt: tpl.last_inspection.created_at,
-        frequencyDays: tpl.box.inspection_frequency_days,
-        now,
-      })
-    : null;
-
-  const draftBanner = draftRestored ? (
-    <div className="flex items-center justify-between gap-2 rounded-full bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
-      <span>Draft restored</span>
-      <div className="flex items-center gap-3 font-semibold">
-        <button type="button" onClick={() => setDraftRestored(false)} className="text-amber-700">
-          Dismiss
-        </button>
-        <button type="button" onClick={clearCurrentDraft} className="text-red-600">
-          Clear
-        </button>
-      </div>
-    </div>
-  ) : null;
-
-  if (phase === 'confirm') {
-    return (
-      <>
-        <AppHeader
-          title="Confirm box"
-          subtitle={tpl.box.box_code}
-          backHref={me ? '/my-boxes' : undefined}
-          showSignOut={Boolean(me)}
-        />
-        <main className="mx-auto max-w-md space-y-3 p-4">
-          {draftBanner}
-          {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
-          <section className="card p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold text-slate-500">{tpl.box.box_code}</p>
-                <h1 className="text-xl font-bold">{tpl.box.box_name}</h1>
-              </div>
-              {due ? <DueBadge status={due.due_status} daysOverdue={due.days_overdue} /> : <Badge tone="neutral">Not Yet Inspected</Badge>}
-            </div>
-            <dl className="mt-4 grid grid-cols-3 gap-y-2 text-sm">
-              <dt className="text-slate-500">Location</dt>
-              <dd className="col-span-2 font-medium">{tpl.box.location_description}</dd>
-              {tpl.box.area && (
-                <>
-                  <dt className="text-slate-500">Area</dt>
-                  <dd className="col-span-2 font-medium">{tpl.box.area}</dd>
-                </>
-              )}
-              <dt className="text-slate-500">Inspector</dt>
-              <dd className="col-span-2 font-medium">{me?.full_name ?? 'Enter below'}</dd>
-              <dt className="text-slate-500">Last check</dt>
-              <dd className="col-span-2 font-medium">{formatDate(tpl.last_inspection?.created_at)}</dd>
-            </dl>
-            <p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">{guidanceNote}</p>
-          </section>
-
-          {!me && (
-            <section className="card p-4">
-              <h2 className="font-semibold">Inspector details</h2>
-              <div className="mt-3 space-y-3">
-                <label className="block">
-                  <span className="label">Your name</span>
-                  <input
-                    className="input"
-                    value={inspectorName}
-                    onChange={(e) => setInspectorName(e.target.value)}
-                    placeholder="First aider name"
-                    autoComplete="name"
-                  />
-                </label>
-                <label className="block">
-                  <span className="label">Department / PIC area (optional)</span>
-                  <input
-                    className="input"
-                    value={inspectorDepartment}
-                    onChange={(e) => setInspectorDepartment(e.target.value)}
-                    placeholder="EHS, Production, Office..."
-                    autoComplete="organization-title"
-                  />
-                </label>
-              </div>
-            </section>
-          )}
-
-          <button
-            type="button"
-            onClick={startInspection}
-            disabled={!me && inspectorName.trim().length < 2}
-            className="btn btn-lg btn-primary w-full"
-            data-tour="inspect-start"
-          >
-            Start Inspection
-          </button>
-        </main>
-      </>
-    );
-  }
-
-  if (phase === 'review') {
-    return (
-      <>
-        <AppHeader
-          title="Final review"
-          subtitle={tpl.box.box_code}
-          backHref={me ? '/my-boxes' : undefined}
-          showSignOut={Boolean(me)}
-        />
-        <main className="mx-auto max-w-md space-y-3 p-4 pb-28">
-          {draftBanner}
-          {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
-          <section className="card p-4" data-tour="review-summary">
-            <h1 className="text-xl font-bold">Inspection summary</h1>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-              <SummaryTile label="Total items" value={tpl.items.length} />
-              <SummaryTile label="OK" value={okCount} />
-              <SummaryTile label="OK · qty updated" value={okQtyUpdatedCount} />
-              <SummaryTile label="Top-up required" value={topupCount} tone="warn" />
-              <SummaryTile label="Replacement" value={replacementCount} tone="bad" />
-              <SummaryTile label="Expired" value={expiredCount} tone="bad" />
-              <SummaryTile label="Label issue" value={labelIssueCount} tone="warn" />
-              <SummaryTile label="Remarks/issues" value={remarksOrIssueCount} tone="warn" />
-            </div>
-            {(expiredCount > 0 || expiringSoonCount > 0 || expiryMismatchCount > 0 || noExpiryDateCount > 0) && (
-              <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                <p className="font-semibold">Expiry issues</p>
-                <ul className="mt-1 list-inside list-disc space-y-0.5">
-                  {expiredCount > 0 && <li>{expiredCount} item{expiredCount === 1 ? '' : 's'} expired</li>}
-                  {expiringSoonCount > 0 && (
-                    <li>{expiringSoonCount} item{expiringSoonCount === 1 ? '' : 's'} expiring soon</li>
-                  )}
-                  {expiryMismatchCount > 0 && (
-                    <li>{expiryMismatchCount} item{expiryMismatchCount === 1 ? '' : 's'} with label mismatch/no label</li>
-                  )}
-                  {noExpiryDateCount > 0 && (
-                    <li>{noExpiryDateCount} item{noExpiryDateCount === 1 ? '' : 's'} with no expiry date recorded</li>
-                  )}
-                </ul>
-              </div>
-            )}
-            <button type="button" onClick={() => goToItem(0)} className="btn btn-md btn-secondary mt-4 w-full">
-              Back to items
-            </button>
-          </section>
-
-          <section className="card p-4" data-tour="review-photo">
-            <h2 className="mb-2 font-semibold">Live box photo</h2>
-            <PhotoCapture
-              initialUrl={photo?.url ?? null}
-              onChange={(next) => {
-                setPhoto(next);
-                setSubmitError(null);
-              }}
-              disabled={submitting}
-            />
-          </section>
-
-          <label className="block">
-            <span className="label">Overall notes (optional)</span>
-            <textarea className="textarea" rows={3} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </label>
-        </main>
-
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
-          <div className="mx-auto max-w-md">
-            <button type="button" onClick={submit} disabled={submitting} className="btn btn-lg btn-primary w-full" data-tour="submit-inspection">
-              {submitting ? (
-                <>
-                  <Spinner className="h-5 w-5" /> Submitting...
-                </>
-              ) : (
-                'Submit Inspection'
-              )}
-            </button>
-          </div>
-        </div>
-      </>
-    );
-  }
+  // counts for the review summary
+  const counts = countItems(tpl, draft, needItems);
 
   return (
     <>
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-md items-center gap-3 px-3 py-2">
-          <CompanyLogo className="h-6 w-auto max-w-[82px] shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold leading-tight">{tpl.box.box_code}</p>
-            <p className="truncate text-xs text-slate-500">{shortLocation}</p>
-          </div>
-          <div className="text-right text-xs font-semibold text-slate-600">
-            Item {currentIndex + 1} of {tpl.items.length}
-          </div>
-          <button type="button" onClick={() => setActiveSheet('details')} className="btn btn-ghost min-h-9 px-2 text-xs">
-            Details
-          </button>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-md space-y-3 p-3 pb-28">
-        {draftBanner}
-        {submitError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>}
-
-        <section className="card flex items-center gap-3 px-3 py-2" data-tour="inspect-progress">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline justify-between gap-2">
-              <p className="text-sm font-semibold">
-                Item {currentIndex + 1} of {tpl.items.length}
-              </p>
-              <p className="shrink-0 text-xs text-slate-500">
-                {checkedCount} checked, {pendingCount} pending
-              </p>
-            </div>
-            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${progressPercent}%` }} />
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setActiveSheet('items')}
-            className="btn btn-ghost min-h-9 shrink-0 px-2 text-xs text-slate-600"
-          >
-            All items
-          </button>
+      <AppHeader title={tpl.box.box_code} subtitle={tpl.box.box_name} backHref="/home" />
+      <main className="mx-auto max-w-2xl space-y-4 p-4 pb-28">
+        {/* Box info */}
+        <section className="card p-4">
+          <h2 className="text-lg font-bold">{tpl.box.box_name}</h2>
+          <p className="text-sm text-slate-500">
+            {tpl.box.location_description}
+            {tpl.box.area ? ` · ${tpl.box.area}` : ''}
+          </p>
+          <p className="mt-1 text-xs text-slate-400">
+            Last inspection: {formatDate(tpl.last_inspection?.created_at)} · Inspector: {me.full_name}
+          </p>
         </section>
 
-        <div
-          key={currentItem.box_item_id}
-          className={`inspection-step ${stepDirection === 'backward' ? 'inspection-step-backward' : 'inspection-step-forward'}`}
-          data-tour="inspect-current-item"
-        >
-          <ChecklistCard
-            item={currentItem}
-            value={obs[currentItem.box_item_id] ?? {}}
-            onChange={setCurrentItem}
-            onComplete={completeCurrentItem}
-            now={now}
+        {submitError && (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{submitError}</p>
+        )}
+
+        {step === 'form' && (
+          <>
+            {/* Quick inspection */}
+            <section className="card p-4">
+              <h3 className="mb-1 text-center text-xl font-bold">Quick Inspection</h3>
+              <p className="mb-4 text-center text-sm text-slate-400">〜〜〜</p>
+              <div className="divide-y divide-slate-100">
+                {QUESTIONS.map((q) => (
+                  <div key={q.key} className="flex items-center justify-between gap-3 py-3">
+                    <span className="font-medium">{q.label}</span>
+                    <div className="w-40">
+                      <YesNo value={a[q.key]} onChange={(v) => setAnswer(q.key, v)} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {a.seal_intact === false && (
+                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Seal not intact — please verify the items below before submitting.
+                </p>
+              )}
+              {hasKnownExpired && (
+                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  This box has an expired item due for replacement — item check required.
+                </p>
+              )}
+            </section>
+
+            {/* Conditional item checklist */}
+            {needItems && (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between px-1">
+                  <h3 className="font-bold">Detailed Item Check</h3>
+                  <button onClick={markRemainingOk} className="btn btn-secondary btn-md">
+                    Mark remaining OK
+                  </button>
+                </div>
+                {tpl.items.map((it) => (
+                  <ItemCheckCard
+                    key={it.box_item_id}
+                    item={it}
+                    value={draft.items[it.box_item_id] ?? {}}
+                    onChange={(next) => setItem(it.box_item_id, next)}
+                  />
+                ))}
+              </section>
+            )}
+
+            {/* Optional notes + photo */}
+            <section className="card p-4">
+              <label className="block">
+                <span className="label">Notes (optional)</span>
+                <textarea
+                  className="textarea"
+                  rows={2}
+                  maxLength={2000}
+                  value={draft.notes}
+                  onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+                />
+              </label>
+              <details className="mt-3">
+                <summary className="cursor-pointer text-sm font-medium text-slate-600">
+                  Add a box photo (optional)
+                </summary>
+                <div className="mt-3">
+                  <PhotoCapture initialUrl={photo?.url ?? null} onChange={setPhoto} disabled={submitting} />
+                </div>
+              </details>
+            </section>
+          </>
+        )}
+
+        {step === 'review' && (
+          <ReviewSummary
+            counts={counts}
+            answers={a}
+            needItems={needItems}
+            onBack={() => setStep('form')}
           />
-        </div>
+        )}
       </main>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
-        <div className="mx-auto max-w-md">
-          {!currentChecked && (
-            <p className="mb-1.5 text-center text-xs text-slate-500">
-              Check item first — tap Still OK &amp; Next or Issue / Change
-            </p>
+      {/* Sticky action bar */}
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
+        <div className="mx-auto max-w-2xl">
+          {step === 'form' ? (
+            <button onClick={goReview} className="btn btn-lg btn-primary w-full">
+              {needItems ? 'Save Item Check & Review' : 'Submit Inspection'}
+            </button>
+          ) : (
+            <button onClick={submit} disabled={submitting} className="btn btn-lg btn-primary w-full">
+              {submitting ? (
+                <>
+                  <Spinner className="h-5 w-5" /> Submitting…
+                </>
+              ) : (
+                'Confirm & Submit'
+              )}
+            </button>
           )}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => goToItem(currentIndex - 1)}
-              disabled={currentIndex === 0}
-              className="btn btn-lg btn-secondary"
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              onClick={nextItem}
-              disabled={!currentChecked}
-              className="btn btn-lg btn-primary"
-            >
-              {currentIndex >= tpl.items.length - 1 ? 'Review' : 'Next item'}
-            </button>
-          </div>
         </div>
       </div>
-
-      {activeSheet === 'details' && (
-        <BottomSheet title="Box details" onClose={() => setActiveSheet(null)}>
-          <BoxDetails
-            tpl={tpl}
-            inspectorName={me?.full_name ?? inspectorName.trim()}
-            guidanceNote={guidanceNote}
-          />
-        </BottomSheet>
-      )}
-
-      {activeSheet === 'items' && (
-        <BottomSheet title="Checklist items" onClose={() => setActiveSheet(null)}>
-          <div className="max-h-[65vh] space-y-2 overflow-y-auto pr-1">
-            {tpl.items.map((item, i) => (
-              <button
-                key={item.box_item_id}
-                type="button"
-                onClick={() => {
-                  setActiveSheet(null);
-                  goToItem(i);
-                }}
-                className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-semibold">
-                    {i + 1}. {item.item_name}
-                  </span>
-                  {itemReviews[i]!.detail && <span className="block text-xs text-slate-500">{itemReviews[i]!.detail}</span>}
-                </span>
-                <StatusChip review={itemReviews[i]!} incomplete={Boolean(itemValidationErrors[i])} />
-              </button>
-            ))}
-          </div>
-        </BottomSheet>
-      )}
     </>
   );
 }
 
-function BoxDetails({
-  tpl,
-  inspectorName,
-  guidanceNote,
+interface Counts {
+  ok: number;
+  low: number;
+  missing: number;
+  expired: number;
+  quickIssues: string[];
+}
+function countItems(tpl: InspectionTemplateResponse, draft: QuickDraft, needItems: boolean): Counts {
+  const c: Counts = { ok: 0, low: 0, missing: 0, expired: 0, quickIssues: [] };
+  if (needItems) {
+    for (const it of tpl.items) {
+      const s = draft.items[it.box_item_id]?.status;
+      if (s === 'OK') c.ok++;
+      else if (s === 'Low Qty') c.low++;
+      else if (s === 'Missing') c.missing++;
+      else if (s === 'Expired') c.expired++;
+    }
+  }
+  const a = draft.answers;
+  if (a.box_accessible === false) c.quickIssues.push('Box Accessibility Issue');
+  if (a.box_clean === false) c.quickIssues.push('Box Condition Issue');
+  if (a.contact_visible === false) c.quickIssues.push('Emergency Contact Not Visible');
+  return c;
+}
+
+function ReviewSummary({
+  counts,
+  answers,
+  needItems,
+  onBack,
 }: {
-  tpl: InspectionTemplateResponse;
-  inspectorName: string;
-  guidanceNote: string;
+  counts: Counts;
+  answers: QuickDraft['answers'];
+  needItems: boolean;
+  onBack: () => void;
 }) {
+  const actionsCount = counts.quickIssues.length + counts.low + counts.missing + counts.expired;
+  const allGood = actionsCount === 0;
   return (
-    <div className="space-y-3 text-sm">
-      <dl className="grid grid-cols-3 gap-y-2">
-        <dt className="text-slate-500">Box code</dt>
-        <dd className="col-span-2 font-medium">{tpl.box.box_code}</dd>
-        <dt className="text-slate-500">Box name</dt>
-        <dd className="col-span-2 font-medium">{tpl.box.box_name}</dd>
-        <dt className="text-slate-500">Location</dt>
-        <dd className="col-span-2 font-medium">{tpl.box.location_description}</dd>
-        {tpl.box.area && (
-          <>
-            <dt className="text-slate-500">Area</dt>
-            <dd className="col-span-2 font-medium">{tpl.box.area}</dd>
-          </>
-        )}
-        <dt className="text-slate-500">Inspector</dt>
-        <dd className="col-span-2 font-medium">{inspectorName || 'Not entered'}</dd>
-        <dt className="text-slate-500">Last check</dt>
-        <dd className="col-span-2 font-medium">{formatDate(tpl.last_inspection?.created_at)}</dd>
-      </dl>
-      <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-600">{guidanceNote}</p>
-    </div>
-  );
-}
+    <section className="card space-y-4 p-5">
+      <h3 className="text-lg font-bold">Review</h3>
 
-function StatusChip({ review, incomplete }: { review: ItemReview; incomplete: boolean }) {
-  const label = incomplete && review.status !== 'Pending' ? `${review.label} - needs info` : review.label;
-  const cls =
-    review.status === 'Issue found'
-      ? 'bg-amber-100 text-amber-900'
-      : incomplete || review.status === 'Pending'
-        ? 'bg-slate-200 text-slate-700'
-        : 'bg-emerald-100 text-emerald-800';
-  return <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>{label}</span>;
-}
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <Stat label="Box accessible" ok={answers.box_accessible !== false} />
+        <Stat label="Clean & undamaged" ok={answers.box_clean !== false} />
+        <Stat label="Seal intact" ok={answers.seal_intact !== false} />
+        <Stat label="Contact visible" ok={answers.contact_visible !== false} />
+      </div>
 
-function SummaryTile({
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  label: string;
-  value: number;
-  tone?: 'neutral' | 'warn' | 'bad';
-}) {
-  const cls =
-    tone === 'bad'
-      ? 'bg-red-50 text-red-800'
-      : tone === 'warn'
-        ? 'bg-amber-50 text-amber-900'
-        : 'bg-slate-50 text-slate-800';
-  return (
-    <div className={`rounded-xl px-3 py-2 ${cls}`}>
-      <p className="text-xs font-medium opacity-75">{label}</p>
-      <p className="text-2xl font-bold">{value}</p>
-    </div>
-  );
-}
-
-function BottomSheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return (
-    <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-label={title}>
-      <button type="button" className="absolute inset-0 h-full w-full cursor-default" onClick={onClose} aria-label="Close" />
-      <section className="bottom-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-bold">{title}</h2>
-          <button type="button" onClick={onClose} className="btn btn-ghost min-h-10 px-3">
-            Close
-          </button>
+      {needItems && (
+        <div className="grid grid-cols-4 gap-2 text-center">
+          <Tile n={counts.ok} label="OK" tone="ok" />
+          <Tile n={counts.low} label="Low" tone="warn" />
+          <Tile n={counts.missing} label="Missing" tone="bad" />
+          <Tile n={counts.expired} label="Expired" tone="bad" />
         </div>
-        {children}
-      </section>
+      )}
+
+      <div className="rounded-xl bg-slate-50 p-3">
+        {allGood ? (
+          <p className="font-medium text-emerald-700">Everything looks good — box will be marked Ready. ✅</p>
+        ) : (
+          <p className="font-medium text-amber-800">
+            {actionsCount} action{actionsCount === 1 ? '' : 's'} will be raised for the ESH team.
+          </p>
+        )}
+      </div>
+
+      <button onClick={onBack} className="btn btn-secondary btn-md w-full">
+        ‹ Back to edit
+      </button>
+    </section>
+  );
+}
+
+function Stat({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={ok ? 'text-emerald-600' : 'text-red-600'}>{ok ? '✓' : '✕'}</span>
+      <span>{label}</span>
+    </div>
+  );
+}
+function Tile({ n, label, tone }: { n: number; label: string; tone: 'ok' | 'warn' | 'bad' }) {
+  const cls = tone === 'ok' ? 'status-ok' : tone === 'warn' ? 'status-warn' : 'status-bad';
+  return (
+    <div className={`rounded-xl p-2 ${cls}`}>
+      <p className="text-xl font-bold">{n}</p>
+      <p className="text-xs">{label}</p>
     </div>
   );
 }
@@ -821,52 +408,58 @@ function BottomSheet({ title, onClose, children }: { title: string; onClose: () 
 function ResultView({
   result,
   tpl,
-  isSignedIn,
 }: {
-  result: InspectionResult;
+  result: QuickInspectionResult;
   tpl: InspectionTemplateResponse;
-  isSignedIn: boolean;
 }) {
-  const s = result.summary;
+  const ready = result.overall_status === 'Ready';
   return (
     <>
-      <AppHeader title="Inspection submitted" subtitle={tpl.box.box_name} showSignOut={isSignedIn} />
-      <main className="mx-auto max-w-3xl space-y-4 p-4">
+      <AppHeader title="Inspection submitted" subtitle={tpl.box.box_code} />
+      <main className="mx-auto max-w-2xl space-y-4 p-4">
         <section className="card flex flex-col items-center gap-3 p-6 text-center">
-          <OverallBadge status={result.overall_status} />
-          <p className="text-sm text-slate-500">
-            {s.ok} OK - {s.low_stock} low - {s.missing} missing - {s.expired} expired - {s.expiring_soon} expiring soon
-          </p>
+          <div className="text-5xl">{ready ? '✅' : '⚠️'}</div>
+          <ReadinessBadge status={result.overall_status} />
+          {result.item_check_performed && (
+            <p className="text-sm text-slate-500">
+              {result.summary.ok} OK · {result.summary.low_qty} low · {result.summary.missing} missing ·{' '}
+              {result.summary.expired} expired
+            </p>
+          )}
         </section>
 
         <section className="card p-4">
-          <h3 className="mb-2 font-semibold">Top-up requested ({result.topups_created})</h3>
-          {result.topup_items.length === 0 ? (
-            <p className="text-sm text-slate-500">No items need a top-up.</p>
+          <h3 className="mb-2 font-semibold">Actions raised ({result.actions.length})</h3>
+          {result.actions.length === 0 ? (
+            <p className="text-sm text-slate-500">No issues — nothing for ESH to action. 🎉</p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {result.topup_items.map((t, i) => (
+              {result.actions.map((a, i) => (
                 <li key={i} className="flex items-center justify-between gap-2 py-2">
                   <div>
-                    <p className="font-medium">{t.item_name}</p>
-                    <p className="text-xs text-slate-500">{t.reason}</p>
+                    <p className="font-medium">{a.action_type}</p>
+                    <p className="text-xs text-slate-500">
+                      {a.action_code}
+                      {a.item_name ? ` · ${a.item_name}` : ''}
+                    </p>
                   </div>
-                  <PriorityBadge priority={t.priority} />
+                  <PriorityBadge priority={a.priority} />
                 </li>
               ))}
             </ul>
           )}
         </section>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {isSignedIn && (
-            <a href="/my-boxes" className="btn btn-lg btn-secondary">
-              My boxes
-            </a>
-          )}
-          <a href={`/inspect/${tpl.box.box_id}`} className="btn btn-lg btn-primary" onClick={() => location.reload()}>
-            Done
+        <div className="grid grid-cols-2 gap-3">
+          <a href="/home" className="btn btn-lg btn-secondary">
+            Home
           </a>
+          <a href="/my-boxes" className="btn btn-lg btn-primary">
+            My boxes
+          </a>
+        </div>
+        <div className="pt-2 text-center">
+          <Badge tone="neutral">Thank you</Badge>
         </div>
       </main>
     </>

@@ -81,7 +81,6 @@ alter table public.box_items                      enable row level security;
 alter table public.inspections                    enable row level security;
 alter table public.inspection_items               enable row level security;
 alter table public.topup_requests                 enable row level security;
-alter table public.expiry_audit_logs              enable row level security;
 alter table public.first_aid_usage_logs           enable row level security;
 alter table public.reminder_logs                  enable row level security;
 
@@ -389,20 +388,6 @@ create policy topups_delete_admin on public.topup_requests
   for delete to authenticated
   using ((select public.active_role()) = 'admin');
 
--- ---- expiry_audit_logs --------------------------------------------------------
--- Admins can view and write explicit admin corrections. Inspection/replacement
--- audit rows are written by the server service-role after validating the reason.
-
-drop policy if exists expiry_audit_select_admin on public.expiry_audit_logs;
-create policy expiry_audit_select_admin on public.expiry_audit_logs
-  for select to authenticated
-  using ((select public.active_role()) = 'admin');
-
-drop policy if exists expiry_audit_insert_admin on public.expiry_audit_logs;
-create policy expiry_audit_insert_admin on public.expiry_audit_logs
-  for insert to authenticated
-  with check ((select public.active_role()) = 'admin');
-
 -- ---- first_aid_usage_logs -------------------------------------------------------
 -- NO insert policy on purpose: public/staff submissions go exclusively through
 -- the server endpoint (service role) which validates, rate-limits and inserts.
@@ -446,7 +431,6 @@ revoke all on table
   public.inspections,
   public.inspection_items,
   public.topup_requests,
-  public.expiry_audit_logs,
   public.first_aid_usage_logs,
   public.reminder_logs,
   public.box_items_effective
@@ -462,7 +446,6 @@ revoke all on table
   public.inspections,
   public.inspection_items,
   public.topup_requests,
-  public.expiry_audit_logs,
   public.first_aid_usage_logs,
   public.reminder_logs,
   public.box_items_effective
@@ -477,7 +460,6 @@ grant select, insert, update, delete  on table public.box_items                 
 grant select, insert, delete          on table public.inspections                  to authenticated;
 grant select, insert                  on table public.inspection_items             to authenticated;
 grant select, insert, update, delete  on table public.topup_requests               to authenticated;
-grant select, insert                  on table public.expiry_audit_logs            to authenticated;
 grant select, delete                  on table public.first_aid_usage_logs         to authenticated;
 grant select                          on table public.reminder_logs                to authenticated;
 grant select                          on table public.box_items_effective          to authenticated;

@@ -30,7 +30,7 @@ export function BoxItemsAdmin() {
     setLoadingItems(true);
     const { data, error } = await sb
       .from('box_items')
-      .select('id, box_id, item_name, required_quantity, unit, measurement_type, has_expiry, expiry_date, expiry_status, last_verified_date, last_replaced_date, item_photo_url, is_active')
+      .select('id, box_id, item_name, required_quantity, unit, measurement_type, has_expiry, expiry_date, item_photo_url, is_active')
       .eq('box_id', id)
       .eq('is_active', true)
       .order('item_name');
@@ -106,23 +106,9 @@ function BoxItemEditor({
         .update({
           required_quantity: requiredQty,
           expiry_date: expiry || null,
-          expiry_status: item.has_expiry ? expiryStatus(expiry || null) : 'Valid',
         })
         .eq('id', item.id);
       if (error) throw new Error(error.message);
-      if (item.has_expiry && (item.expiry_date ?? '') !== expiry) {
-        const { data: authData } = await sb.auth.getUser();
-        const { error: auditError } = await sb.from('expiry_audit_logs').insert({
-          box_id: item.box_id,
-          box_item_id: item.id,
-          old_expiry_date: item.expiry_date,
-          new_expiry_date: expiry || null,
-          changed_by: authData.user?.id ?? null,
-          reason: 'Admin correction from box item editor.',
-          source: 'admin_correction',
-        });
-        if (auditError) throw new Error(auditError.message);
-      }
       onSaved();
     } catch (e) {
       onError(e instanceof Error ? e.message : 'Could not save.');
@@ -150,9 +136,8 @@ function BoxItemEditor({
         </label>
         {item.has_expiry && (
           <label className="block">
-            <span className="label">Current stock expiry date</span>
+            <span className="label">Expected expiry date</span>
             <input type="date" className="input" value={expiry} onChange={(e) => setExpiry(e.target.value)} />
-            {item.expiry_status && <p className="mt-1 text-xs text-slate-500">Status: {item.expiry_status}</p>}
           </label>
         )}
       </div>
@@ -161,13 +146,4 @@ function BoxItemEditor({
       </button>
     </Section>
   );
-}
-
-function expiryStatus(expiryDate: string | null): string {
-  if (!expiryDate) return 'No expiry date recorded';
-  const today = new Date().toISOString().slice(0, 10);
-  if (expiryDate < today) return 'Expired';
-  const soon = new Date(Date.now() + 60 * 86_400_000).toISOString().slice(0, 10);
-  if (expiryDate <= soon) return 'Expiring soon';
-  return 'Valid';
 }

@@ -57,9 +57,6 @@ export interface BoxItemRow {
   measurement_type: string;
   has_expiry: boolean;
   expiry_date: string | null;
-  expiry_status: string | null;
-  last_verified_date: string | null;
-  last_replaced_date: string | null;
   item_photo_url: string | null;
   is_active: boolean;
 }
@@ -68,7 +65,6 @@ export interface TopupRow {
   id: string;
   box_id: string;
   item_name: string;
-  item_photo_url: string | null;
   reason: string | null;
   priority: 'Low' | 'Medium' | 'High' | null;
   status: 'Open' | 'In Progress' | 'Completed' | 'Rejected';
@@ -127,3 +123,19 @@ export function Section({ title, children, actions }: { title: string; children:
 }
 
 export const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
+
+/**
+ * Build an ABSOLUTE app URL for QR codes / links. Prefers NEXT_PUBLIC_APP_URL;
+ * otherwise falls back to the origin the admin is currently browsing from, so
+ * the QR is never a relative path (which would be unscannable).
+ */
+export function absoluteUrl(path: string): string {
+  const envBase = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${envBase || origin}${path}`;
+}
+
+/** True when a URL points at localhost / a private host (QR won't work on a phone). */
+export function isLocalHostUrl(url: string): boolean {
+  return /\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(url);
+}

@@ -26,7 +26,7 @@ function chunk(type, data) {
 }
 
 function makePng(size) {
-  const bg = [0xdc, 0x26, 0x26];
+  const bg = [0x16, 0xa3, 0x4a];
   const fg = [0xff, 0xff, 0xff];
   const s = size / 512;
   const radius = 96 * s;

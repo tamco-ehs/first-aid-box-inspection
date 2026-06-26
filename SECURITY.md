@@ -288,3 +288,25 @@ Phase 1 test suite still passes).
   any box, inspection, or prior usage data. Submissions go through the
   validated, rate-limited, honeypot-guarded `/api/usage` endpoint, and the page
   shows only a generic thank-you. Carries the global `noindex`.
+
+---
+
+# Revamp (v2) - quick inspection + actions
+
+## 25. Same security model, new workflow
+
+- The quick inspection and the `actions` table reuse the existing boundaries
+  exactly: `/api/inspections` still authenticates, checks role
+  (admin/first_aider) + active + box assignment, then writes via the service
+  role and raises actions; a first aider still cannot inspect an unassigned box.
+- **`actions` RLS** mirrors the old top-up model: admin manages all; viewer
+  reads all; first_aider reads only actions for their assigned boxes; **anon
+  gets nothing**. First aiders cannot insert or close actions (no policy) - the
+  server raises them and only ESH/admin closes them. Verified by
+  `supabase/tests/actions_test.sql`.
+- **Closing actions** (`/api/actions/close`) is admin-only and is the only path
+  that bulk-updates box-item quantity/expiry; box readiness ("Ready" vs "Action
+  Required") is derived from remaining open actions, never trusted from input.
+- All item statuses and which actions to raise are still decided **server-side**
+  from the submitted answers; the client cannot fabricate a "Ready" box that has
+  unresolved issues.
