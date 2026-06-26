@@ -24,15 +24,23 @@ export async function POST(req: Request): Promise<Response> {
 
     const { data: action } = await admin
       .from('actions')
-      .select('id, box_id, status')
+      .select('id, box_id, status, category')
       .eq('id', body.action_id)
       .maybeSingle();
     if (!action) throw notFound('Action not found.');
-    const boxId = (action as { box_id: string }).box_id;
+    const actionRow = action as { box_id: string; status: string; category: string };
+    if (actionRow.status !== 'Open' && actionRow.status !== 'In Progress') {
+      throw badRequest('This action is already closed or no longer active.');
+    }
+    if (actionRow.category !== 'item') {
+      throw badRequest('Only item actions can be updated here.');
+    }
+    const boxId = actionRow.box_id;
 
     // 1. Update the selected box items.
     const updatedItemIds: string[] = [];
     const submittedItems = body.items ?? [];
+    if (submittedItems.length === 0) throw badRequest('Select at least one active item to update.');
     const itemIds = submittedItems.map((it) => it.box_item_id);
     const expiryByItem = new Map<string, boolean>();
     if (itemIds.length > 0) {
@@ -40,6 +48,7 @@ export async function POST(req: Request): Promise<Response> {
         .from('box_items')
         .select('id, has_expiry')
         .eq('box_id', boxId)
+        .eq('is_active', true)
         .in('id', itemIds);
       if (itemMetaErr) {
         console.error('[actions/close] item metadata lookup failed:', itemMetaErr.message);
@@ -51,6 +60,7 @@ export async function POST(req: Request): Promise<Response> {
     }
     for (const it of submittedItems) {
       const patch: Record<string, unknown> = {};
+      if (!expiryByItem.has(it.box_item_id)) continue;
       const hasExpiry = expiryByItem.get(it.box_item_id) ?? false;
       if (it.after_refill_quantity != null) patch.current_quantity = it.after_refill_quantity;
       if (hasExpiry && it.new_expiry_date) patch.expiry_date = it.new_expiry_date;
@@ -60,12 +70,16 @@ export async function POST(req: Request): Promise<Response> {
         .from('box_items')
         .update(patch)
         .eq('id', it.box_item_id)
-        .eq('box_id', boxId);
+        .eq('box_id', boxId)
+        .eq('is_active', true);
       if (error) {
         console.error('[actions/close] box_item update failed:', error.message);
         throw new ApiError(500, 'close_failed', 'Could not update box items.');
       }
       updatedItemIds.push(it.box_item_id);
+    }
+    if (updatedItemIds.length === 0) {
+      throw badRequest('No active box items were updated.');
     }
 
     const now = new Date().toISOString();
@@ -102,6 +116,7 @@ export async function POST(req: Request): Promise<Response> {
           closure_note: body.closure_note ?? 'Resolved with bulk top-up.',
         })
         .eq('box_id', boxId)
+        .eq('category', 'item')
         .in('status', ['Open', 'In Progress'])
         .in('box_item_id', updatedItemIds);
     }

@@ -7,8 +7,6 @@ import type { InspectionTemplateResponse, Me, QuickInspectionResult } from '@/li
 import {
   clearDraft,
   emptyDraft,
-  loadDraft,
-  saveDraft,
   type ItemDraft,
   type QuickDraft,
 } from '@/lib/client/draft.ts';
@@ -53,13 +51,17 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
 
   useEffect(() => {
     let active = true;
+    clearDraft(boxId);
+    setDraft(emptyDraft(boxId));
+    setStep('form');
+    setPhoto(null);
+    setSubmitError(null);
+    setResult(null);
     (async () => {
       try {
         const t = await api.inspectionTemplate(boxId);
         if (!active) return;
         setTpl(t);
-        const saved = loadDraft(boxId);
-        if (saved) setDraft(saved);
       } catch (err) {
         if (!active) return;
         if (err instanceof ApiClientError) {
@@ -73,11 +75,6 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
       active = false;
     };
   }, [boxId]);
-
-  // autosave draft
-  useEffect(() => {
-    if (tpl && !result) saveDraft(draft);
-  }, [draft, tpl, result]);
 
   const today = todayIso();
   const hasKnownExpired = useMemo(
@@ -178,7 +175,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
       setResult(res);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Submission failed. Your draft is saved — retry.');
+      setSubmitError(e instanceof Error ? e.message : 'Submission failed. Please retry before leaving this page.');
       setStep('form');
     } finally {
       setSubmitting(false);

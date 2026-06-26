@@ -17,6 +17,13 @@ const SELECT =
   'required_quantity, observed_quantity, new_quantity, expiry_date, new_expiry_date, priority, ' +
   'status, details, closure_note, created_at, closed_at';
 
+interface ActionListRow {
+  box_id: string;
+  category: 'quick_check' | 'item';
+  action_type: string;
+  box_item_id: string | null;
+}
+
 export async function GET(req: Request): Promise<Response> {
   return safe(async () => {
     const ctx = await requireActive();
@@ -46,7 +53,26 @@ export async function GET(req: Request): Promise<Response> {
       throw badRequest('Could not load actions.');
     }
 
-    const rows = (data ?? []) as unknown as { box_id: string }[];
+    let rows = (data ?? []) as unknown as ActionListRow[];
+    if (rows.some((r) => r.category === 'item')) {
+      const itemIds = [
+        ...new Set(rows.filter((r) => r.category === 'item' && r.box_item_id).map((r) => r.box_item_id as string)),
+      ];
+      const activeItemIds = new Set<string>();
+      if (itemIds.length > 0) {
+        const { data: activeItems } = await admin
+          .from('box_items')
+          .select('id')
+          .eq('is_active', true)
+          .in('id', itemIds);
+        for (const item of (activeItems ?? []) as { id: string }[]) activeItemIds.add(item.id);
+      }
+      rows = rows.filter(
+        (r) =>
+          r.category !== 'item' ||
+          (isUpdateItemAction(r.action_type) && r.box_item_id != null && activeItemIds.has(r.box_item_id)),
+      );
+    }
     const boxIds = [...new Set(rows.map((r) => r.box_id))];
     const boxById = new Map<
       string,
@@ -76,4 +102,8 @@ export async function GET(req: Request): Promise<Response> {
     const actions = rows.map((a) => ({ ...a, boxes: boxById.get(a.box_id) ?? null }));
     return jsonOk({ actions });
   });
+}
+
+function isUpdateItemAction(actionType: string) {
+  return actionType === 'Item Low Qty' || actionType === 'Item Missing' || actionType === 'Item Expired';
 }

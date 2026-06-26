@@ -11,7 +11,7 @@ import { EshNav } from '@/components/esh/EshNav';
 import { Spinner } from '@/components/Spinner';
 import { ActionStatusBadge, PriorityBadge } from '@/components/StatusBadge';
 
-const STATUSES = ['Open', 'In Progress', 'Closed', 'all'] as const;
+const STATUSES = ['Open', 'In Progress'] as const;
 
 interface ActionGroup {
   boxId: string;
@@ -59,7 +59,7 @@ function Actions({ me }: { me: Me }) {
               onClick={() => setStatus(s)}
               className={`btn btn-md ${status === s ? 'btn-primary' : 'btn-secondary'}`}
             >
-              {s === 'all' ? 'All' : s}
+              {s}
             </button>
           ))}
         </div>
@@ -72,7 +72,7 @@ function Actions({ me }: { me: Me }) {
         )}
 
         {data && groups.length === 0 && (
-          <div className="card p-8 text-center text-slate-500">No Low Stock, Missing, or Expired actions in this status.</div>
+          <div className="card p-8 text-center text-slate-500">No active Low Stock, Missing, or Expired actions in this status.</div>
         )}
 
         <div className="space-y-3">

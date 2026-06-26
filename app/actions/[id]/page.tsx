@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { api } from '@/lib/client/api.ts';
 import type { ActionRow, InspectionTemplateResponse, TemplateItem } from '@/lib/client/types.ts';
 import { todayIso } from '@/lib/client/format.ts';
@@ -21,17 +21,23 @@ export default function CloseActionPage() {
   return <RequireAuth roles={['admin']}>{() => <CloseAction actionId={params.id} />}</RequireAuth>;
 }
 
-function isExpired(it: TemplateItem, today: string) {
-  return Boolean(it.has_expiry && it.current_expiry_date && it.current_expiry_date < today);
+function isActiveItemAction(action: ActionRow) {
+  return (
+    action.category === 'item' &&
+    (action.status === 'Open' || action.status === 'In Progress') &&
+    (action.action_type === 'Item Low Qty' ||
+      action.action_type === 'Item Missing' ||
+      action.action_type === 'Item Expired')
+  );
 }
-function isShort(it: TemplateItem) {
-  return it.required_quantity != null && it.current_quantity != null && it.current_quantity < it.required_quantity;
+function actionMatchesItem(action: ActionRow, item: TemplateItem) {
+  return action.box_item_id === item.box_item_id || (action.box_item_id == null && action.item_name === item.item_name);
 }
 
 function CloseAction({ actionId }: { actionId: string }) {
-  const router = useRouter();
   const today = todayIso();
   const [action, setAction] = useState<ActionRow | null>(null);
+  const [activeActions, setActiveActions] = useState<ActionRow[]>([]);
   const [tpl, setTpl] = useState<InspectionTemplateResponse | null>(null);
   const [state, setState] = useState<Record<string, ItemState>>({});
   const [note, setNote] = useState('');
@@ -44,26 +50,22 @@ function CloseAction({ actionId }: { actionId: string }) {
     let active = true;
     (async () => {
       try {
-        const list = await api.actions('status=all');
+        const list = await api.actions('category=item');
         const a = list.actions.find((x) => x.id === actionId);
         if (!a) {
-          if (active) setLoadErr('Action not found.');
+          if (active) setLoadErr('Action not found, already closed, or no longer active.');
           return;
         }
         const t = await api.inspectionTemplate(a.box_id);
         if (!active) return;
+        const boxActions = list.actions.filter((x) => x.box_id === a.box_id && isActiveItemAction(x));
         setAction(a);
+        setActiveActions(boxActions);
         setTpl(t);
-        // preselect risk items; default refill to required, keep expiry
         const init: Record<string, ItemState> = {};
-        for (const it of t.items) {
-          const risk =
-            isExpired(it, today) ||
-            isShort(it) ||
-            a.box_item_id === it.box_item_id ||
-            (a.item_name != null && a.item_name === it.item_name);
+        for (const it of t.items.filter((item) => boxActions.some((activeAction) => actionMatchesItem(activeAction, item)))) {
           init[it.box_item_id] = {
-            selected: risk,
+            selected: true,
             after_refill_quantity: it.required_quantity ?? it.current_quantity ?? null,
             new_expiry_date: it.has_expiry ? it.current_expiry_date ?? '' : '',
           };
@@ -79,6 +81,13 @@ function CloseAction({ actionId }: { actionId: string }) {
   }, [actionId, today]);
 
   const selectedCount = useMemo(() => Object.values(state).filter((s) => s.selected).length, [state]);
+  const updateItems = useMemo(
+    () =>
+      tpl
+        ? tpl.items.filter((item) => activeActions.some((activeAction) => actionMatchesItem(activeAction, item)))
+        : [],
+    [activeActions, tpl],
+  );
 
   if (loadErr) return <AccessBlocked message={loadErr} />;
   if (!action || !tpl) return <FullScreenLoader label="Loading action…" />;
@@ -111,7 +120,7 @@ function CloseAction({ actionId }: { actionId: string }) {
   const selectRisk = () =>
     setState((s) => {
       const next = { ...s };
-      for (const it of tpl.items) next[it.box_item_id] = { ...next[it.box_item_id]!, selected: isExpired(it, today) || isShort(it) };
+      for (const it of updateItems) next[it.box_item_id] = { ...next[it.box_item_id]!, selected: true };
       return next;
     });
 
@@ -120,7 +129,7 @@ function CloseAction({ actionId }: { actionId: string }) {
     setSaving(true);
     setSaveErr(null);
     try {
-      const items = tpl!.items
+      const items = updateItems
         .filter((it) => state[it.box_item_id]?.selected)
         .map((it) => ({
           box_item_id: it.box_item_id,
@@ -165,8 +174,15 @@ function CloseAction({ actionId }: { actionId: string }) {
         {saveErr && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{saveErr}</p>}
 
         <div className="space-y-2">
-          {tpl.items.map((it) => {
-            const st = state[it.box_item_id]!;
+          {updateItems.length === 0 && (
+            <div className="card p-8 text-center text-slate-500">No active action items require updates.</div>
+          )}
+          {updateItems.map((it) => {
+            const st = state[it.box_item_id] ?? {
+              selected: true,
+              after_refill_quantity: it.required_quantity ?? it.current_quantity ?? null,
+              new_expiry_date: it.has_expiry ? it.current_expiry_date ?? '' : '',
+            };
             return (
               <div
                 key={it.box_item_id}
