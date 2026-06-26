@@ -1,5 +1,8 @@
 // GET /api/actions - ESH action list. admin/viewer see all; first_aider sees
 // actions for their assigned boxes. Defaults to Open + In Progress.
+//
+// Box info is joined in code (not via a PostgREST embed) so the list does not
+// depend on PostgREST having cached the actions->boxes relationship.
 
 import { getAssignedBoxIds, requireActive } from '@/lib/auth';
 import { badRequest, jsonOk, safe } from '@/lib/http';
@@ -12,8 +15,7 @@ export const dynamic = 'force-dynamic';
 const SELECT =
   'id, action_code, box_id, inspection_id, action_type, category, box_item_id, item_name, ' +
   'required_quantity, observed_quantity, new_quantity, expiry_date, new_expiry_date, priority, ' +
-  'status, details, closure_note, created_at, closed_at, ' +
-  'boxes(box_code, box_name, location_description, area)';
+  'status, details, closure_note, created_at, closed_at';
 
 export async function GET(req: Request): Promise<Response> {
   return safe(async () => {
@@ -43,6 +45,35 @@ export async function GET(req: Request): Promise<Response> {
       console.error('[actions] list failed:', error.message);
       throw badRequest('Could not load actions.');
     }
-    return jsonOk({ actions: data ?? [] });
+
+    const rows = (data ?? []) as unknown as { box_id: string }[];
+    const boxIds = [...new Set(rows.map((r) => r.box_id))];
+    const boxById = new Map<
+      string,
+      { box_code: string; box_name: string; location_description: string; area: string | null }
+    >();
+    if (boxIds.length > 0) {
+      const { data: boxRows } = await admin
+        .from('boxes')
+        .select('id, box_code, box_name, location_description, area')
+        .in('id', boxIds);
+      for (const b of (boxRows ?? []) as {
+        id: string;
+        box_code: string;
+        box_name: string;
+        location_description: string;
+        area: string | null;
+      }[]) {
+        boxById.set(b.id, {
+          box_code: b.box_code,
+          box_name: b.box_name,
+          location_description: b.location_description,
+          area: b.area,
+        });
+      }
+    }
+
+    const actions = rows.map((a) => ({ ...a, boxes: boxById.get(a.box_id) ?? null }));
+    return jsonOk({ actions });
   });
 }

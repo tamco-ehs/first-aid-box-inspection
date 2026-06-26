@@ -31,24 +31,29 @@ async function buildDashboard(admin: Admin) {
   const today = now.toISOString().slice(0, 10);
   const in30 = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
 
-  const [{ data: boxesData }, { data: inspData }, { data: actData }, { data: itemData }] =
+  const [{ data: boxesData }, { data: inspData }, actionsRes, { data: itemData }, { data: allBoxesData }] =
     await Promise.all([
       admin
         .from('boxes')
         .select('id, box_code, box_name, location_description, area, created_at, inspection_frequency_days')
         .eq('is_active', true),
       admin.from('inspections').select('box_id, created_at, seal_intact').order('created_at', { ascending: false }),
+      // NOTE: no boxes(...) embed here - we join box info in code below so this
+      // does not depend on PostgREST resolving the actions->boxes relationship.
       admin
         .from('actions')
-        .select('id, action_code, box_id, action_type, category, item_name, priority, created_at, boxes(box_code, location_description, area)')
+        .select('id, action_code, box_id, action_type, category, item_name, priority, created_at')
         .in('status', ['Open', 'In Progress'])
         .order('created_at', { ascending: false }),
       admin.from('box_items').select('box_id, has_expiry, expiry_date').eq('is_active', true),
+      admin.from('boxes').select('id, box_code, location_description, area'),
     ]);
+
+  if (actionsRes.error) console.error('[reports] open actions query failed:', actionsRes.error.message);
 
   const boxes = (boxesData ?? []) as BoxRow[];
   const inspections = (inspData ?? []) as { box_id: string; created_at: string; seal_intact: boolean | null }[];
-  const actions = (actData ?? []) as unknown as Array<{
+  const actions = (actionsRes.data ?? []) as Array<{
     id: string;
     action_code: string;
     box_id: string;
@@ -57,9 +62,18 @@ async function buildDashboard(admin: Admin) {
     item_name: string | null;
     priority: string | null;
     created_at: string;
-    boxes: { box_code: string; location_description: string; area: string | null } | null;
   }>;
   const items = (itemData ?? []) as { box_id: string; has_expiry: boolean; expiry_date: string | null }[];
+
+  const boxInfo = new Map<string, { box_code: string; location_description: string; area: string | null }>();
+  for (const b of (allBoxesData ?? []) as {
+    id: string;
+    box_code: string;
+    location_description: string;
+    area: string | null;
+  }[]) {
+    boxInfo.set(b.id, { box_code: b.box_code, location_description: b.location_description, area: b.area });
+  }
 
   // latest inspection per box (rows are desc-ordered)
   const latestByBox = new Map<string, { created_at: string; seal_intact: boolean | null }>();
@@ -96,16 +110,19 @@ async function buildDashboard(admin: Admin) {
   const completed = Math.max(0, total - attention);
   const percent = total > 0 ? Math.round((completed / total) * 100) : 100;
 
-  const needs_attention = actions.slice(0, 12).map((a) => ({
-    id: a.id,
-    action_code: a.action_code,
-    box_code: a.boxes?.box_code ?? '—',
-    location: [a.boxes?.location_description, a.boxes?.area].filter(Boolean).join(' · '),
-    issue_type: a.action_type,
-    item_name: a.item_name,
-    priority: a.priority,
-    created_at: a.created_at,
-  }));
+  const needs_attention = actions.slice(0, 12).map((a) => {
+    const bi = boxInfo.get(a.box_id);
+    return {
+      id: a.id,
+      action_code: a.action_code,
+      box_code: bi?.box_code ?? '—',
+      location: [bi?.location_description, bi?.area].filter(Boolean).join(' · '),
+      issue_type: a.action_type,
+      item_name: a.item_name,
+      priority: a.priority,
+      created_at: a.created_at,
+    };
+  });
 
   // 6-month inspection trend
   const trend: { label: string; count: number }[] = [];
@@ -170,11 +187,11 @@ export async function GET(req: Request): Promise<Response> {
     if (areaBoxIds) iq = iq.in('box_id', areaBoxIds);
     const { data: inspections } = await iq;
 
-    // actions
+    // actions (box info joined in code, not via a PostgREST embed)
     let aq = admin
       .from('actions')
       .select(
-        'id, action_code, box_id, action_type, category, item_name, required_quantity, observed_quantity, priority, status, details, closure_note, created_at, closed_at, boxes(box_code, area)',
+        'id, action_code, box_id, action_type, category, item_name, required_quantity, observed_quantity, priority, status, details, closure_note, created_at, closed_at',
       )
       .order('created_at', { ascending: false })
       .limit(500);
@@ -182,7 +199,20 @@ export async function GET(req: Request): Promise<Response> {
     if (toExclusive) aq = aq.lt('created_at', toExclusive);
     if (f.box_id) aq = aq.eq('box_id', f.box_id);
     if (areaBoxIds) aq = aq.in('box_id', areaBoxIds);
-    const { data: actions } = await aq;
+    const { data: actionsData, error: actionsErr } = await aq;
+    if (actionsErr) console.error('[reports] actions list query failed:', actionsErr.message);
+
+    const { data: boxRows } = await admin.from('boxes').select('id, box_code, area');
+    const boxByIdReport = new Map(
+      ((boxRows ?? []) as { id: string; box_code: string; area: string | null }[]).map((b) => [
+        b.id,
+        { box_code: b.box_code, area: b.area },
+      ]),
+    );
+    const actions = ((actionsData ?? []) as { box_id: string }[]).map((a) => ({
+      ...a,
+      boxes: boxByIdReport.get(a.box_id) ?? null,
+    }));
 
     // usage
     let uq = admin
