@@ -5,11 +5,11 @@ import type { ItemCheckStatus, TemplateItem } from '@/lib/client/types.ts';
 import { ItemPhoto } from '@/components/ItemPhoto';
 import { formatDate } from '@/lib/client/format.ts';
 
-const OPTIONS: { value: ItemCheckStatus; tone: 'ok' | 'warn' | 'bad' }[] = [
+const OPTIONS: { value: ItemCheckStatus; tone: 'ok' | 'warn' | 'bad'; requiresExpiry?: boolean }[] = [
   { value: 'OK', tone: 'ok' },
   { value: 'Low Qty', tone: 'warn' },
   { value: 'Missing', tone: 'bad' },
-  { value: 'Expired', tone: 'bad' },
+  { value: 'Expired', tone: 'bad', requiresExpiry: true },
 ];
 const toneOn = { ok: 'choice-on-ok', warn: 'choice-on-warn', bad: 'choice-on-bad' };
 
@@ -44,7 +44,7 @@ export function ItemCheckCard({
       </div>
 
       <div className="mt-3 flex gap-2">
-        {OPTIONS.map((o) => (
+        {OPTIONS.filter((o) => !o.requiresExpiry || item.has_expiry).map((o) => (
           <button
             key={o.value}
             type="button"
@@ -83,7 +83,7 @@ export function ItemCheckCard({
         </div>
       )}
 
-      {status === 'Expired' && (
+      {status === 'Expired' && item.has_expiry && (
         <div className="mt-3 space-y-2">
           <label className="block">
             <span className="label">New expiry date (only if already replaced)</span>

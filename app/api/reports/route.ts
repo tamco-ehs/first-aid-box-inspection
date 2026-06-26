@@ -193,6 +193,8 @@ export async function GET(req: Request): Promise<Response> {
       .select(
         'id, action_code, box_id, action_type, category, item_name, required_quantity, observed_quantity, priority, status, details, closure_note, created_at, closed_at',
       )
+      .eq('category', 'item')
+      .in('action_type', ['Item Low Qty', 'Item Missing', 'Item Expired'])
       .order('created_at', { ascending: false })
       .limit(500);
     if (f.from) aq = aq.gte('created_at', f.from);

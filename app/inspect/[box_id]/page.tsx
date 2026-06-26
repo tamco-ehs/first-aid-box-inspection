@@ -122,6 +122,8 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
       for (const it of tpl!.items) {
         const v = draft.items[it.box_item_id];
         if (!v?.status) return `Please check every item (e.g. ${it.item_name}).`;
+        if (v.status === 'Expired' && !it.has_expiry)
+          return `"${it.item_name}": only items marked as expirable in the master list can be marked Expired.`;
         if (v.status === 'Low Qty' && (v.observed_quantity == null || !v.remark))
           return `"${it.item_name}": enter current quantity and a remark.`;
         if (v.status === 'Missing' && !v.remark) return `"${it.item_name}": a remark is required.`;
@@ -154,7 +156,7 @@ function Inspect({ me, boxId }: { me: Me; boxId: string }) {
               box_item_id: it.box_item_id,
               status: v.status!,
               observed_quantity: v.observed_quantity ?? null,
-              new_expiry_date: v.new_expiry_date ?? null,
+              new_expiry_date: it.has_expiry ? v.new_expiry_date ?? null : null,
               remark: v.remark ?? null,
             };
           })
@@ -327,7 +329,7 @@ function countItems(tpl: InspectionTemplateResponse, draft: QuickDraft, needItem
       if (s === 'OK') c.ok++;
       else if (s === 'Low Qty') c.low++;
       else if (s === 'Missing') c.missing++;
-      else if (s === 'Expired') c.expired++;
+      else if (s === 'Expired' && it.has_expiry) c.expired++;
     }
   }
   const a = draft.answers;

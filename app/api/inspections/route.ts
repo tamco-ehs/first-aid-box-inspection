@@ -24,6 +24,7 @@ interface SpecRow {
   item_name: string;
   required_quantity: number | null;
   unit: string | null;
+  has_expiry: boolean;
 }
 
 interface ActionInsert {
@@ -88,7 +89,7 @@ export async function POST(req: Request): Promise<Response> {
     if (itemCheckPerformed) {
       const { data: specs } = await admin
         .from('box_items_effective')
-        .select('id, item_name, required_quantity, unit')
+        .select('id, item_name, required_quantity, unit, has_expiry')
         .eq('box_id', body.box_id)
         .eq('is_active', true);
       specById = new Map(((specs ?? []) as SpecRow[]).map((s) => [s.id, s]));
@@ -120,16 +121,20 @@ export async function POST(req: Request): Promise<Response> {
       if (!spec) throw badRequest('A submitted item does not belong to this box.');
       if (seen.has(it.box_item_id)) throw badRequest('Duplicate item in submission.');
       seen.add(it.box_item_id);
+      if (it.status === 'Expired' && !spec.has_expiry) {
+        throw badRequest(`"${spec.item_name}": only items marked as expirable in the master list can be marked Expired.`);
+      }
 
       const observed =
         it.status === 'Missing' ? 0 : it.status === 'OK' ? spec.required_quantity : it.observed_quantity ?? null;
+      const newExpiry = spec.has_expiry ? it.new_expiry_date ?? null : null;
 
       itemLines.push({
         box_item_id: spec.id,
         item_name: spec.item_name,
         required_quantity: spec.required_quantity,
         observed_quantity: observed,
-        expiry_date: it.new_expiry_date ?? null,
+        expiry_date: newExpiry,
         item_status: it.status,
         remarks: it.remark ?? null,
       });
@@ -149,8 +154,8 @@ export async function POST(req: Request): Promise<Response> {
           item_name: spec.item_name,
           required_quantity: spec.required_quantity,
           observed_quantity: observed,
-          expiry_date: it.status === 'Expired' ? it.new_expiry_date ?? null : null,
-          new_expiry_date: it.new_expiry_date ?? null,
+          expiry_date: it.status === 'Expired' ? newExpiry : null,
+          new_expiry_date: newExpiry,
           priority: mapped.priority,
           details: it.remark ?? null,
         });
@@ -163,7 +168,7 @@ export async function POST(req: Request): Promise<Response> {
         patch.current_quantity = it.observed_quantity;
       else if (it.status === 'OK' && spec.required_quantity != null)
         patch.current_quantity = spec.required_quantity;
-      if (it.new_expiry_date) patch.expiry_date = it.new_expiry_date;
+      if (spec.has_expiry && it.new_expiry_date) patch.expiry_date = it.new_expiry_date;
       if (Object.keys(patch).length > 0) boxItemUpdates.push({ id: spec.id, patch });
     }
 

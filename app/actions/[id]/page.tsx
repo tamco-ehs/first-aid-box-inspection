@@ -65,7 +65,7 @@ function CloseAction({ actionId }: { actionId: string }) {
           init[it.box_item_id] = {
             selected: risk,
             after_refill_quantity: it.required_quantity ?? it.current_quantity ?? null,
-            new_expiry_date: it.current_expiry_date ?? '',
+            new_expiry_date: it.has_expiry ? it.current_expiry_date ?? '' : '',
           };
         }
         setState(init);
@@ -125,7 +125,7 @@ function CloseAction({ actionId }: { actionId: string }) {
         .map((it) => ({
           box_item_id: it.box_item_id,
           after_refill_quantity: state[it.box_item_id]!.after_refill_quantity,
-          new_expiry_date: state[it.box_item_id]!.new_expiry_date || null,
+          new_expiry_date: it.has_expiry ? state[it.box_item_id]!.new_expiry_date || null : null,
         }));
       const res = await api.closeAction({ action_id: actionId, closure_note: note.trim() || null, items });
       setDone({ box_ready: res.box_ready, updated: res.updated_items });
@@ -189,7 +189,7 @@ function CloseAction({ actionId }: { actionId: string }) {
                       Current {it.current_quantity ?? 0} / Required {it.required_quantity ?? '?'}
                     </p>
 
-                    <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div className={`mt-2 grid gap-2 ${it.has_expiry ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
                       <label className="block">
                         <span className="label">After refill</span>
                         <input
@@ -204,16 +204,17 @@ function CloseAction({ actionId }: { actionId: string }) {
                           }
                         />
                       </label>
-                      <label className="block">
-                        <span className="label">New expiry</span>
-                        <input
-                          type="date"
-                          className="input"
-                          disabled={!it.has_expiry}
-                          value={st.new_expiry_date}
-                          onChange={(e) => setItem(it.box_item_id, { new_expiry_date: e.target.value })}
-                        />
-                      </label>
+                      {it.has_expiry && (
+                        <label className="block">
+                          <span className="label">New expiry</span>
+                          <input
+                            type="date"
+                            className="input"
+                            value={st.new_expiry_date}
+                            onChange={(e) => setItem(it.box_item_id, { new_expiry_date: e.target.value })}
+                          />
+                        </label>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -253,7 +254,7 @@ function QtyBadge({ current, required }: { current: number | null; required: num
 }
 
 function ExpiryBadge({ item, today }: { item: TemplateItem; today: string }) {
-  if (!item.has_expiry) return <Badge tone="neutral">No Expiry</Badge>;
+  if (!item.has_expiry) return <Badge tone="neutral">Qty only</Badge>;
   if (!item.current_expiry_date) return <Badge tone="neutral">No date</Badge>;
   if (item.current_expiry_date < today) return <Badge tone="bad">Expired</Badge>;
   const days = Math.floor((new Date(item.current_expiry_date).getTime() - new Date(today).getTime()) / 86_400_000);

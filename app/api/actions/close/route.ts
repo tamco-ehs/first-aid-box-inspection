@@ -32,10 +32,28 @@ export async function POST(req: Request): Promise<Response> {
 
     // 1. Update the selected box items.
     const updatedItemIds: string[] = [];
-    for (const it of body.items ?? []) {
+    const submittedItems = body.items ?? [];
+    const itemIds = submittedItems.map((it) => it.box_item_id);
+    const expiryByItem = new Map<string, boolean>();
+    if (itemIds.length > 0) {
+      const { data: itemMeta, error: itemMetaErr } = await admin
+        .from('box_items')
+        .select('id, has_expiry')
+        .eq('box_id', boxId)
+        .in('id', itemIds);
+      if (itemMetaErr) {
+        console.error('[actions/close] item metadata lookup failed:', itemMetaErr.message);
+        throw new ApiError(500, 'close_failed', 'Could not validate box items.');
+      }
+      for (const row of (itemMeta ?? []) as { id: string; has_expiry: boolean }[]) {
+        expiryByItem.set(row.id, row.has_expiry);
+      }
+    }
+    for (const it of submittedItems) {
       const patch: Record<string, unknown> = {};
+      const hasExpiry = expiryByItem.get(it.box_item_id) ?? false;
       if (it.after_refill_quantity != null) patch.current_quantity = it.after_refill_quantity;
-      if (it.new_expiry_date) patch.expiry_date = it.new_expiry_date;
+      if (hasExpiry && it.new_expiry_date) patch.expiry_date = it.new_expiry_date;
       if (Object.keys(patch).length === 0) continue;
 
       const { error } = await admin
@@ -61,8 +79,11 @@ export async function POST(req: Request): Promise<Response> {
         closed_at: now,
         closure_note: body.closure_note ?? null,
         new_quantity:
-          body.items?.length === 1 ? body.items[0]!.after_refill_quantity ?? null : null,
-        new_expiry_date: body.items?.length === 1 ? body.items[0]!.new_expiry_date ?? null : null,
+          submittedItems.length === 1 ? submittedItems[0]!.after_refill_quantity ?? null : null,
+        new_expiry_date:
+          submittedItems.length === 1 && (expiryByItem.get(submittedItems[0]!.box_item_id) ?? false)
+            ? submittedItems[0]!.new_expiry_date ?? null
+            : null,
       })
       .eq('id', body.action_id);
     if (closeErr) {
