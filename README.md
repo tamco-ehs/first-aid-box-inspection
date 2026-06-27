@@ -23,7 +23,7 @@ at the database level with Row Level Security - not by hiding buttons.
 - **Framework:** Next.js 15 (App Router) + TypeScript + Tailwind CSS, hosted on Vercel
 - **Database / Auth:** Supabase Postgres + Supabase Auth (email login)
 - **Images:** Cloudinary (item reference photos + optional live box photos), signed server-side
-- **Email:** Resend, triggered by Vercel Cron (`0 0 * * *` = 08:00 Malaysia)
+- **Email:** Brevo or Resend, triggered by Vercel Cron (`0 0 * * *` = 08:00 Malaysia)
 - **Mobile:** PWA (installable, offline app-shell, localStorage inspection drafts)
 - **QR codes:** `qrcode.react` (inspection + usage QR per box, in Admin)
 
@@ -76,12 +76,14 @@ tailwind.config.ts, postcss.config.mjs, vercel.json, .env.example
    project, run the three SQL files in order, create the first users, promote
    your admin.
 2. Copy `.env.example` to `.env.local` and fill in the keys (server-only
-   secrets stay out of `NEXT_PUBLIC_*`). Configure Cloudinary + Resend.
+   secrets stay out of `NEXT_PUBLIC_*`). Configure Cloudinary + Brevo or Resend.
 3. `npm install && npm run dev` and open http://localhost:3000 - you are routed
    to `/login`. Sign in to reach your boxes / reports / admin by role.
 4. Deploy to Vercel; set the same env vars; the cron runs daily automatically.
-   When adding or changing `RESEND_API_KEY`, redeploy Production before testing
-   `/api/check-reminders`, because Vercel env vars only apply to new deployments.
+   When adding or changing email env vars such as `BREVO_API_KEY`,
+   `EMAIL_PROVIDER`, or `REMINDER_FROM_EMAIL`, redeploy Production before
+   testing `/api/check-reminders`, because Vercel env vars only apply to new
+   deployments.
 
 ## Verifying locally (no Docker needed)
 
@@ -154,7 +156,7 @@ npm run build     # Next.js production build
 | Noindex + PWA + RLS still enforced | **Yes** | robots/header/meta; manifest + `sw.js`; all data behind authed APIs |
 
 UI render verified by screenshot (login screen). Full end-to-end flows require
-your Supabase/Cloudinary/Resend credentials in `.env.local`.
+your Supabase/Cloudinary/email-provider credentials in `.env.local`.
 
 See [docs/API.md](docs/API.md) for the full endpoint reference and the
 per-route authorization matrix.

@@ -360,7 +360,7 @@ async function sendDueSummary(
     console.log('[cron] due summary email sent', {
       scope: adminSummary ? 'admin_due_summary' : 'assigned_user_due_summary',
       count: pending.length,
-      resend_message_id: result.id,
+      message_id: result.id,
     });
   } else {
     console.error('[cron] due summary email failed', {
@@ -403,7 +403,7 @@ async function sendActionSummary(
   if (result.ok) {
     console.log('[cron] admin action summary email sent', {
       count: pending.length,
-      resend_message_id: result.id,
+      message_id: result.id,
     });
   } else {
     console.error('[cron] admin action summary email failed', {

@@ -1,7 +1,8 @@
 // =============================================================================
-// Resend email helper (fetch-based - no SDK dependency). The API key is
-// server-only. Used by the reminder cron. All dynamic values are HTML-escaped
-// before interpolation as defense-in-depth against injection in the email body.
+// Email helper (fetch-based - no SDK dependency). Supports Brevo and Resend,
+// with server-only API keys. Used by the reminder cron. All dynamic values are
+// HTML-escaped before interpolation as defense-in-depth against injection in the
+// email body.
 // =============================================================================
 
 import { PUBLIC_ENV, SERVER_ENV } from '@/lib/env';
@@ -39,6 +40,17 @@ export async function sendEmail(opts: {
   if (opts.to.length === 0) {
     return { ok: false, id: null, error: 'No recipients.' };
   }
+
+  const provider = SERVER_ENV.emailProvider();
+  return provider === 'brevo' ? sendBrevoEmail(opts) : sendResendEmail(opts);
+}
+
+async function sendResendEmail(opts: {
+  to: string[];
+  subject: string;
+  html: string;
+  text: string;
+}): Promise<EmailResult> {
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -64,6 +76,63 @@ export async function sendEmail(opts: {
   } catch (err) {
     return { ok: false, id: null, error: err instanceof Error ? err.message : 'send failed' };
   }
+}
+
+async function sendBrevoEmail(opts: {
+  to: string[];
+  subject: string;
+  html: string;
+  text: string;
+}): Promise<EmailResult> {
+  try {
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'api-key': SERVER_ENV.brevoApiKey(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sender: parseSender(SERVER_ENV.reminderFromEmail()),
+        to: opts.to.map((email) => ({ email })),
+        subject: opts.subject,
+        htmlContent: opts.html,
+        textContent: opts.text,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      return { ok: false, id: null, error: `Brevo ${res.status}: ${body.slice(0, 200)}` };
+    }
+    const data = (await res.json()) as { messageId?: string };
+    return { ok: true, id: data.messageId ?? null };
+  } catch (err) {
+    return { ok: false, id: null, error: err instanceof Error ? err.message : 'send failed' };
+  }
+}
+
+function parseSender(value: string): { email: string; name?: string } {
+  const cleaned = stripOuterQuotes(value.trim());
+  const match = cleaned.match(/^(.*?)\s*<([^<>]+)>$/);
+  if (!match) return { email: cleaned };
+
+  const email = match[2]?.trim() ?? cleaned;
+  const rawName = stripOuterQuotes((match[1] ?? '').trim());
+  return {
+    email,
+    ...(rawName ? { name: rawName } : {}),
+  };
+}
+
+function stripOuterQuotes(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
 }
 
 export interface ReminderContext {

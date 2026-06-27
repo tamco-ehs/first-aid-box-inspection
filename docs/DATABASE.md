@@ -119,7 +119,7 @@ policy exists for anyone, and only admin/viewer can read. `client_ip_hash`
 
 ### `reminder_logs`
 Audit trail for Phase 3 email reminders (`due_soon` / `overdue`, recipient,
-Resend message id, status, error). The cron consults the latest row per
+provider message id, status, error). The cron consults the latest row per
 (box, type) before sending - this is the duplicate-reminder guard. Written by
 service role only; read by admin only.
 

@@ -31,6 +31,12 @@ export const SERVER_ENV = {
   supabaseServiceRoleKey: () => required('SUPABASE_SERVICE_ROLE_KEY'),
   cloudinaryApiKey: () => required('CLOUDINARY_API_KEY'),
   cloudinaryApiSecret: () => required('CLOUDINARY_API_SECRET'),
+  emailProvider: () => {
+    const explicit = process.env.EMAIL_PROVIDER?.trim().toLowerCase();
+    if (explicit === 'brevo' || explicit === 'resend') return explicit;
+    return process.env.BREVO_API_KEY?.trim() ? 'brevo' : 'resend';
+  },
+  brevoApiKey: () => required('BREVO_API_KEY'),
   resendApiKey: () => required('RESEND_API_KEY'),
   reminderFromEmail: () => optional('REMINDER_FROM_EMAIL', 'First Aid Reminders <onboarding@resend.dev>'),
   adminNotificationEmail: () => process.env.ADMIN_NOTIFICATION_EMAIL?.trim() || null,
