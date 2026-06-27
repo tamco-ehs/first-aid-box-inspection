@@ -356,6 +356,19 @@ async function sendDueSummary(
     ? buildAdminDueSummaryEmail({ items: pending })
     : buildAssignedReminderSummaryEmail({ recipientName: recipient.fullName, items: pending });
   const result = await sendEmail({ to: [recipient.email], subject: mail.subject, html: mail.html, text: mail.text });
+  if (result.ok) {
+    console.log('[cron] due summary email sent', {
+      scope: adminSummary ? 'admin_due_summary' : 'assigned_user_due_summary',
+      count: pending.length,
+      resend_message_id: result.id,
+    });
+  } else {
+    console.error('[cron] due summary email failed', {
+      scope: adminSummary ? 'admin_due_summary' : 'assigned_user_due_summary',
+      count: pending.length,
+      error: result.error ?? 'send failed',
+    });
+  }
 
   for (const entry of pending) {
     await logReminder(admin, {
@@ -387,6 +400,17 @@ async function sendActionSummary(
 
   const mail = buildAdminActionSummaryEmail({ actions: pending });
   const result = await sendEmail({ to: [recipient.email], subject: mail.subject, html: mail.html, text: mail.text });
+  if (result.ok) {
+    console.log('[cron] admin action summary email sent', {
+      count: pending.length,
+      resend_message_id: result.id,
+    });
+  } else {
+    console.error('[cron] admin action summary email failed', {
+      count: pending.length,
+      error: result.error ?? 'send failed',
+    });
+  }
 
   for (const entry of pending) {
     await logReminder(admin, {
