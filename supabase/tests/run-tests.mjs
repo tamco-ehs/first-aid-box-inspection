@@ -30,6 +30,7 @@ const steps = [
   ['supabase/revamp.sql',           'revamp: actions table + quick-check columns'],
   ['supabase/seed.sql',             'seed: baseline template, 22 items, 2 boxes'],
   ['supabase/superadmin_roles.sql',  'roles: superadmin/admin/user migration'],
+  ['supabase/email_reminder_cycles.sql', 'reminders: cycle dedup migration'],
   ['supabase/tests/smoke_test.sql', 'RLS smoke tests (all roles, all tables)'],
   ['supabase/tests/actions_test.sql', 'revamp smoke tests (actions RLS + code trigger)'],
 ];

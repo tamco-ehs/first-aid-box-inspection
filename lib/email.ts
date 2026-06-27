@@ -119,3 +119,129 @@ export function buildEscalationEmail(ctx: ReminderContext): {
     </div>`;
   return { subject, html, text };
 }
+
+export interface ReminderSummaryItem {
+  title: string;
+  boxName: string;
+  location: string;
+  status: string;
+  detail: string;
+  link: string;
+}
+
+export interface ActionSummaryItem {
+  actionCode: string;
+  actionType: string;
+  boxName: string;
+  location: string;
+  itemName: string | null;
+  priority: string | null;
+  link: string;
+}
+
+function listHtml(items: ReminderSummaryItem[]): string {
+  return `
+    <ul style="padding-left:18px">
+      ${items
+        .map(
+          (item) => `
+            <li style="margin:0 0 12px">
+              <strong>${escapeHtml(item.title)}</strong><br/>
+              <span>${escapeHtml(item.boxName)} - ${escapeHtml(item.location)}</span><br/>
+              <span>Status: ${escapeHtml(item.status)}</span><br/>
+              <span>${escapeHtml(item.detail)}</span><br/>
+              <a href="${escapeHtml(item.link)}">${escapeHtml(item.link)}</a>
+            </li>`,
+        )
+        .join('')}
+    </ul>`;
+}
+
+function listText(items: ReminderSummaryItem[]): string {
+  return items
+    .map(
+      (item, index) =>
+        `${index + 1}. ${item.title}\n` +
+        `   Box: ${item.boxName}\n` +
+        `   Location: ${item.location}\n` +
+        `   Status: ${item.status}\n` +
+        `   ${item.detail}\n` +
+        `   Link: ${item.link}`,
+    )
+    .join('\n\n');
+}
+
+export function buildAssignedReminderSummaryEmail(ctx: {
+  recipientName: string | null;
+  items: ReminderSummaryItem[];
+}): { subject: string; html: string; text: string } {
+  const subject = `First Aid reminders: ${ctx.items.length} item${ctx.items.length === 1 ? '' : 's'} need attention`;
+  const greeting = ctx.recipientName ? `Hi ${ctx.recipientName},` : 'Hi,';
+  const text =
+    `${greeting}\n\nThe following assigned first aid checks are almost due or already due:\n\n` +
+    `${listText(ctx.items)}\n`;
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:640px">
+      <h2 style="margin:0 0 12px">First Aid reminders</h2>
+      <p>${escapeHtml(greeting)}</p>
+      <p>The following assigned first aid checks are almost due or already due:</p>
+      ${listHtml(ctx.items)}
+    </div>`;
+  return { subject, html, text };
+}
+
+export function buildAdminDueSummaryEmail(ctx: {
+  items: ReminderSummaryItem[];
+}): { subject: string; html: string; text: string } {
+  const subject = `First Aid due summary: ${ctx.items.length} inspection/item reminder${ctx.items.length === 1 ? '' : 's'}`;
+  const text =
+    `Admin summary: the following inspections or items are almost due or already due:\n\n` +
+    `${listText(ctx.items)}\n`;
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:640px">
+      <h2 style="margin:0 0 12px">First Aid due summary</h2>
+      <p>The following inspections or items are almost due or already due:</p>
+      ${listHtml(ctx.items)}
+    </div>`;
+  return { subject, html, text };
+}
+
+export function buildAdminActionSummaryEmail(ctx: {
+  actions: ActionSummaryItem[];
+}): { subject: string; html: string; text: string } {
+  const subject = `First Aid action summary: ${ctx.actions.length} required action${ctx.actions.length === 1 ? '' : 's'}`;
+  const text =
+    `Admin summary: the following required action items are open or in progress:\n\n` +
+    ctx.actions
+      .map(
+        (action, index) =>
+          `${index + 1}. ${action.actionType}${action.itemName ? ` - ${action.itemName}` : ''}\n` +
+          `   Code: ${action.actionCode}\n` +
+          `   Box: ${action.boxName}\n` +
+          `   Location: ${action.location}\n` +
+          `   Priority: ${action.priority ?? 'Not set'}\n` +
+          `   Link: ${action.link}`,
+      )
+      .join('\n\n') +
+    '\n';
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:680px">
+      <h2 style="margin:0 0 12px">First Aid required action summary</h2>
+      <p>The following required action items are open or in progress:</p>
+      <ul style="padding-left:18px">
+        ${ctx.actions
+          .map(
+            (action) => `
+              <li style="margin:0 0 12px">
+                <strong>${escapeHtml(action.actionType)}${action.itemName ? ` - ${escapeHtml(action.itemName)}` : ''}</strong><br/>
+                <span>Code: ${escapeHtml(action.actionCode)}</span><br/>
+                <span>${escapeHtml(action.boxName)} - ${escapeHtml(action.location)}</span><br/>
+                <span>Priority: ${escapeHtml(action.priority ?? 'Not set')}</span><br/>
+                <a href="${escapeHtml(action.link)}">${escapeHtml(action.link)}</a>
+              </li>`,
+          )
+          .join('')}
+      </ul>
+    </div>`;
+  return { subject, html, text };
+}

@@ -367,7 +367,19 @@ create table public.reminder_logs (
   id                 uuid primary key default gen_random_uuid(),
   box_id             uuid not null references public.boxes (id),
   reminder_type      text not null default 'overdue'
-                     check (reminder_type in ('due_soon', 'overdue')),
+                     check (reminder_type in (
+                       'due_soon',
+                       'overdue',
+                       'inspection_due_soon',
+                       'inspection_overdue',
+                       'item_due_soon',
+                       'item_overdue',
+                       'action_required'
+                     )),
+  reminder_key       text
+                     check (reminder_key is null or char_length(reminder_key) <= 160),
+  cycle_key          text
+                     check (cycle_key is null or char_length(cycle_key) <= 40),
   days_overdue       integer not null default 0
                      check (days_overdue between -365 and 3650),
   email_sent_to      text
@@ -383,7 +395,7 @@ create table public.reminder_logs (
 );
 
 comment on table public.reminder_logs is
-  'Written only by the Phase 3 cron job (service role). The cron checks the latest row per (box_id, reminder_type) before sending, which prevents duplicate reminders.';
+  'Written only by the reminder cron job (service role). reminder_key + cycle_key prevent duplicate reminder emails for the same box, item, or action in the same cycle.';
 
 
 -- =============================================================================
@@ -406,6 +418,7 @@ create index idx_usage_logs_box_created       on public.first_aid_usage_logs (bo
 create index idx_usage_logs_created           on public.first_aid_usage_logs (created_at desc);
 create index idx_usage_logs_ip                on public.first_aid_usage_logs (client_ip_hash, created_at desc);
 create index idx_reminder_logs_box            on public.reminder_logs (box_id, reminder_type, sent_at desc);
+create index idx_reminder_logs_cycle          on public.reminder_logs (reminder_type, reminder_key, cycle_key, status);
 
 
 -- =============================================================================
