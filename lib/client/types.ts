@@ -172,6 +172,13 @@ export interface NeedsAttentionRow {
   created_at: string;
 }
 
+export interface ActionMonthlyPoint {
+  label: string;
+  created: number;
+  closed: number;
+  backlog: number;
+}
+
 export interface ReportInspection {
   id: string;
   box_id: string;
@@ -202,6 +209,7 @@ export interface ReportsResponse {
   compliance: Compliance;
   needs_attention: NeedsAttentionRow[];
   trend: { label: string; count: number }[];
+  action_monthly: ActionMonthlyPoint[];
   inspections: ReportInspection[];
   actions: ActionRow[];
   usage_logs: ReportUsage[];

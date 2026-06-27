@@ -1,5 +1,5 @@
 // GET /api/reports - ESH dashboard + report lists. admin + viewer only.
-// Returns: the readiness dashboard (7 metric cards), Needs Attention Today,
+// Returns: the readiness dashboard, Needs Attention Today,
 // a compliance summary, a 6-month trend, and filtered lists (inspections,
 // actions, usage logs) for the report tabs + CSV export.
 
@@ -25,6 +25,12 @@ interface BoxRow {
   inspection_frequency_days: number;
 }
 
+interface ActionMonthlyRow {
+  created_at: string;
+  closed_at: string | null;
+  status: string;
+}
+
 async function buildDashboard(admin: Admin) {
   const now = new Date();
   const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -32,7 +38,14 @@ async function buildDashboard(admin: Admin) {
   const today = now.toISOString().slice(0, 10);
   const in30 = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
 
-  const [{ data: boxesData }, { data: inspData }, actionsRes, { data: itemData }, { data: allBoxesData }] =
+  const [
+    { data: boxesData },
+    { data: inspData },
+    actionsRes,
+    { data: itemData },
+    { data: allBoxesData },
+    { data: monthlyActionData },
+  ] =
     await Promise.all([
       admin
         .from('boxes')
@@ -48,6 +61,12 @@ async function buildDashboard(admin: Admin) {
         .order('created_at', { ascending: false }),
       admin.from('box_items').select('box_id, has_expiry, expiry_date').eq('is_active', true),
       admin.from('boxes').select('id, box_code, location_description, area'),
+      admin
+        .from('actions')
+        .select('created_at, closed_at, status')
+        .eq('category', 'item')
+        .in('action_type', ['Item Low Qty', 'Item Missing', 'Item Expired'])
+        .limit(5000),
     ]);
 
   if (actionsRes.error) console.error('[reports] open actions query failed:', actionsRes.error.message);
@@ -111,7 +130,7 @@ async function buildDashboard(admin: Admin) {
   const completed = Math.max(0, total - attention);
   const percent = total > 0 ? Math.round((completed / total) * 100) : 100;
 
-  const needs_attention = actions.slice(0, 12).map((a) => {
+  const needs_attention = actions.map((a) => {
     const bi = boxInfo.get(a.box_id);
     return {
       id: a.id,
@@ -137,6 +156,8 @@ async function buildDashboard(admin: Admin) {
     trend.push({ label, count });
   }
 
+  const action_monthly = buildActionMonthly((monthlyActionData ?? []) as ActionMonthlyRow[], now);
+
   return {
     dashboard: {
       due_this_month,
@@ -150,7 +171,36 @@ async function buildDashboard(admin: Admin) {
     compliance: { percent, completed, attention, total },
     needs_attention,
     trend,
+    action_monthly,
   };
+}
+
+function buildActionMonthly(actions: ActionMonthlyRow[], now: Date) {
+  const points: { label: string; created: number; closed: number; backlog: number }[] = [];
+
+  for (let i = 5; i >= 0; i--) {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i + 1, 1));
+    const label = start.toLocaleString('en-GB', { month: 'short' });
+
+    let created = 0;
+    let closed = 0;
+    let backlog = 0;
+    for (const action of actions) {
+      const createdAt = new Date(action.created_at);
+      const closedAt = action.closed_at ? new Date(action.closed_at) : null;
+      const resolvedWithoutDate = !closedAt && (action.status === 'Closed' || action.status === 'Rejected');
+      const resolvedAt = closedAt ?? (resolvedWithoutDate ? createdAt : null);
+
+      if (createdAt >= start && createdAt < next) created++;
+      if (closedAt && closedAt >= start && closedAt < next) closed++;
+      if (createdAt < next && (!resolvedAt || resolvedAt >= next)) backlog++;
+    }
+
+    points.push({ label, created, closed, backlog });
+  }
+
+  return points;
 }
 
 export async function GET(req: Request): Promise<Response> {
