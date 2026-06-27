@@ -85,7 +85,7 @@ export async function GET(): Promise<Response> {
     // Active assignments -> assigned inspectors per box.
     const { data: assignData } = await admin
       .from('box_assignments')
-      .select('box_id, is_primary_responsible, profiles(full_name, email)')
+      .select('box_id, is_primary_responsible, profiles!box_assignments_profile_id_fkey(full_name, email)')
       .in('box_id', boxIds)
       .eq('is_active', true);
 

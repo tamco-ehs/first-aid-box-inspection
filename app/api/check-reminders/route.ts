@@ -177,7 +177,7 @@ async function getAdminRecipients(admin: Admin): Promise<Recipient[]> {
 async function getAssignments(admin: Admin): Promise<Map<string, Recipient[]>> {
   const { data, error } = await admin
     .from('box_assignments')
-    .select('box_id, profiles(id, full_name, email, is_active, role)')
+    .select('box_id, profiles!box_assignments_profile_id_fkey(id, full_name, email, is_active, role)')
     .eq('is_active', true);
   if (error) {
     console.error('[cron] assignment lookup failed:', error.message);
