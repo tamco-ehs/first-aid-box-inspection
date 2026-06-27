@@ -80,6 +80,8 @@ tailwind.config.ts, postcss.config.mjs, vercel.json, .env.example
 3. `npm install && npm run dev` and open http://localhost:3000 - you are routed
    to `/login`. Sign in to reach your boxes / reports / admin by role.
 4. Deploy to Vercel; set the same env vars; the cron runs daily automatically.
+   When adding or changing `RESEND_API_KEY`, redeploy Production before testing
+   `/api/check-reminders`, because Vercel env vars only apply to new deployments.
 
 ## Verifying locally (no Docker needed)
 
