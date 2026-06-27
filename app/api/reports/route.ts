@@ -8,6 +8,7 @@ import { badRequest, jsonOk, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { computeDue } from '@/lib/logic/due.ts';
 import { reportsQuerySchema, firstZodMessage } from '@/lib/validation';
+import { ensureExpiredItemActions } from '@/lib/server/expired-actions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -163,6 +164,7 @@ export async function GET(req: Request): Promise<Response> {
     const f = parsed.data;
 
     const admin = createAdminClient();
+    await ensureExpiredItemActions(admin);
     const toExclusive = f.to ? new Date(new Date(f.to).getTime() + 86_400_000).toISOString() : null;
 
     let areaBoxIds: string[] | null = null;

@@ -8,6 +8,7 @@ import { getAssignedBoxIds, requireActive } from '@/lib/auth';
 import { badRequest, jsonOk, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { actionsQuerySchema, firstZodMessage } from '@/lib/validation';
+import { ensureExpiredItemActions } from '@/lib/server/expired-actions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,7 @@ export async function GET(req: Request): Promise<Response> {
     const f = parsed.data;
 
     const admin = createAdminClient();
+    await ensureExpiredItemActions(admin);
     let q = admin.from('actions').select(SELECT).order('created_at', { ascending: false }).limit(500);
 
     if (f.status && f.status !== 'all') q = q.eq('status', f.status);

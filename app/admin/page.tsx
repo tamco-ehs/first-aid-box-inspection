@@ -9,16 +9,18 @@ import { BoxesAdmin } from '@/components/admin/BoxesAdmin';
 import { AssignmentsAdmin } from '@/components/admin/AssignmentsAdmin';
 import { TemplateAdmin } from '@/components/admin/TemplateAdmin';
 import { BoxItemsAdmin } from '@/components/admin/BoxItemsAdmin';
+import { ExpiringItemsAdmin } from '@/components/admin/ExpiringItemsAdmin';
 import { UsersAdmin } from '@/components/admin/UsersAdmin';
 import { EshNav } from '@/components/esh/EshNav';
 
-type Tab = 'boxes' | 'assignments' | 'template' | 'box-items' | 'users';
+type Tab = 'boxes' | 'assignments' | 'template' | 'box-items' | 'expiring-items' | 'users';
 
 const TABS: [Tab, string][] = [
   ['boxes', 'Boxes'],
   ['assignments', 'Assignments'],
   ['template', 'Checklist'],
   ['box-items', 'Box items'],
+  ['expiring-items', 'Expiring items'],
   ['users', 'Users'],
 ];
 
@@ -55,6 +57,7 @@ function Admin({ me }: { me: Me }) {
         {tab === 'assignments' && <AssignmentsAdmin />}
         {tab === 'template' && <TemplateAdmin />}
         {tab === 'box-items' && <BoxItemsAdmin />}
+        {tab === 'expiring-items' && <ExpiringItemsAdmin />}
         {tab === 'users' && <UsersAdmin />}
       </main>
     </>

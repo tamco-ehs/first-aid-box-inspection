@@ -186,7 +186,7 @@ function Cards({
   onOpenTab: (tab: Tab) => void;
 }) {
   const inventoryTarget: CardTarget = canOpenAdmin
-    ? { kind: 'href', href: '/admin?tab=box-items' }
+    ? { kind: 'href', href: '/admin?tab=expiring-items' }
     : { kind: 'tab', tab: 'actions' };
   const cards: Array<{
     label: string;
@@ -196,14 +196,13 @@ function Cards({
   }> = [
     { label: 'Due This Month', value: d.due_this_month, tone: 'neutral', target: { kind: 'href', href: '/my-boxes?filter=due-this-month' } },
     { label: 'Overdue', value: d.overdue, tone: d.overdue > 0 ? 'bad' : 'ok', target: { kind: 'href', href: '/my-boxes?filter=overdue' } },
-    { label: 'Quick Check Issues', value: d.quick_check_issues, tone: d.quick_check_issues > 0 ? 'warn' : 'ok', target: { kind: 'tab', tab: 'inspections' } },
     { label: 'Seal Broken / Used', value: d.seal_broken_used, tone: d.seal_broken_used > 0 ? 'warn' : 'ok', target: { kind: 'tab', tab: 'inspections' } },
     { label: 'Expired Items', value: d.expired_items, tone: d.expired_items > 0 ? 'bad' : 'ok', target: inventoryTarget },
     { label: 'Expiring in 30 Days', value: d.expiring_30_days, tone: d.expiring_30_days > 0 ? 'warn' : 'ok', target: inventoryTarget },
     { label: 'Open Actions', value: d.open_actions, tone: d.open_actions > 0 ? 'warn' : 'ok', target: { kind: 'href', href: '/actions' } },
   ];
   return (
-    <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+    <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       {cards.map(({ label, value, tone, target }) => {
         const content = (
           <>
