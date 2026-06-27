@@ -18,7 +18,7 @@ interface ItemState {
 
 export default function CloseActionPage() {
   const params = useParams<{ id: string }>();
-  return <RequireAuth roles={['admin']}>{() => <CloseAction actionId={params.id} />}</RequireAuth>;
+  return <RequireAuth roles={['superadmin', 'admin']}>{() => <CloseAction actionId={params.id} />}</RequireAuth>;
 }
 
 function isActiveItemAction(action: ActionRow) {

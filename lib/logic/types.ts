@@ -2,7 +2,7 @@
 // This file is import-free (types only) so the logic modules stay unit-testable
 // under `node --test` with TypeScript type-stripping.
 
-export type Role = 'admin' | 'first_aider' | 'viewer';
+export type Role = 'superadmin' | 'admin' | 'user';
 
 export type MeasurementType = 'quantity' | 'volume_level' | 'present_absent';
 

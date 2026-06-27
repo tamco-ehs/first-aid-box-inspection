@@ -6,6 +6,7 @@
 --   1. schema.sql        (this file: tables, constraints, indexes, triggers)
 --   2. rls_policies.sql  (row level security + privilege hardening)
 --   3. seed.sql          (checklist baseline template + example boxes)
+--   4. superadmin_roles.sql (Superadmin/Admin/User role migration + RLS)
 --
 -- UUID support: gen_random_uuid() is built into PostgreSQL 13+ and is enabled
 -- by default on every Supabase project. No extension is required.
@@ -35,15 +36,15 @@ create table public.profiles (
   email       text
               check (email is null or (char_length(email) <= 254
                      and email ~* '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$')),
-  role        text not null default 'viewer'
-              check (role in ('admin', 'first_aider', 'viewer')),
+  role        text not null default 'user'
+              check (role in ('superadmin', 'admin', 'user')),
   is_active   boolean not null default true,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
 
 comment on table public.profiles is
-  'App profile per auth user. New sign-ups are created as INACTIVE viewers by trigger; an admin must activate them and assign a role.';
+  'App profile per auth user. New sign-ups are created as INACTIVE users by trigger; a superadmin must activate them and assign the proper role.';
 comment on column public.profiles.is_active is
   'Kill switch. Inactive users keep their login but lose all access (enforced in RLS).';
 comment on column public.profiles.email is
@@ -354,7 +355,7 @@ create table public.first_aid_usage_logs (
 );
 
 comment on table public.first_aid_usage_logs is
-  'Written ONLY by the server endpoint (service role) after validation + rate limiting; submitters never get read access. Readable by admin and viewer roles only.';
+  'Written ONLY by the server endpoint (service role) after validation + rate limiting; submitters never get read access. Readable by superadmin and admin roles only.';
 comment on column public.first_aid_usage_logs.client_ip_hash is
   'sha256(submitter IP + IP_HASH_SALT). Used for rate limiting and abuse investigation on the public usage form. Raw IPs are never stored; not shown in any UI.';
 
@@ -431,8 +432,8 @@ create trigger trg_box_items_updated_at       before update on public.box_items 
 
 -- ---- auto-create a locked-down profile for every new auth user ---------------
 -- New users (invited by admin, or self-signup if it is ever enabled) start as
--- role 'viewer' AND is_active = false: they can log in but can access nothing
--- until an admin activates them and assigns the proper role.
+-- role 'user' AND is_active = false: they can log in but can access nothing
+-- until a superadmin activates them and assigns the proper role.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -448,7 +449,7 @@ begin
       split_part(coalesce(new.email, 'new.user@unknown'), '@', 1)
     ),
     new.email,
-    'viewer',
+    'user',
     false
   )
   on conflict (id) do nothing;

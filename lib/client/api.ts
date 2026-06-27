@@ -13,6 +13,7 @@ import type {
   QuickInspectionResult,
   ReportsResponse,
   SignatureResponse,
+  Role,
 } from './types.ts';
 
 export class ApiClientError extends Error {
@@ -94,6 +95,25 @@ export interface ActionCloseBody {
   }>;
 }
 
+export interface AdminUserBody {
+  email: string;
+  password: string;
+  full_name: string;
+  employee_id?: string | null;
+  department?: string | null;
+  role: Role;
+  is_active: boolean;
+}
+
+export interface AdminUserUpdateBody {
+  id: string;
+  full_name?: string;
+  employee_id?: string | null;
+  department?: string | null;
+  role?: Role;
+  is_active?: boolean;
+}
+
 export const api = {
   me: () => request<Me>('/api/me'),
   myBoxes: () => request<MyBoxesResponse>('/api/my-boxes'),
@@ -104,6 +124,13 @@ export const api = {
   submitUsage: (body: UsageSubmitBody) =>
     request<{ ok: boolean; message: string }>('/api/usage', { method: 'POST', body: JSON.stringify(body) }),
   reports: (query: string) => request<ReportsResponse>(`/api/reports${query ? `?${query}` : ''}`),
+  adminUsers: () => request<{ users: Me[] }>('/api/admin/users'),
+  createAdminUser: (body: AdminUserBody) =>
+    request<{ ok: boolean; user: Me }>('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
+  updateAdminUser: (body: AdminUserUpdateBody) =>
+    request<{ ok: boolean }>('/api/admin/users', { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteAdminUser: (id: string) =>
+    request<{ ok: boolean }>('/api/admin/users', { method: 'DELETE', body: JSON.stringify({ id }) }),
   actions: (query: string) => request<ActionsResponse>(`/api/actions${query ? `?${query}` : ''}`),
   closeAction: (body: ActionCloseBody) =>
     request<{ ok: boolean; box_ready: boolean; updated_items: number }>('/api/actions/close', {

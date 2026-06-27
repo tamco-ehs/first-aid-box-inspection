@@ -46,7 +46,7 @@ function MyBoxesInner({ me }: { me: Me }) {
         title="My First Aid Boxes"
         subtitle={me.full_name}
         right={
-          me.role === 'admin' || me.role === 'viewer' ? (
+          me.role === 'superadmin' || me.role === 'admin' ? (
             <a href="/reports" className="btn btn-ghost btn-md text-slate-600">
               Dashboard
             </a>

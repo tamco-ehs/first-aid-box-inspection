@@ -1,7 +1,7 @@
 -- =============================================================================
 -- REVAMP SMOKE TEST - actions table RLS + action_code trigger.
 -- *** LOCAL ONLY. *** Runs after smoke_test.sql, reusing its users/boxes:
---   0001 admin, 0002 first_aider (assigned to WH box 1111...), 0003 viewer.
+--   0001 superadmin, 0002 user (assigned to WH box 1111...), 0003 admin.
 --   Box 1111... (WH) has first aiders; box 2222... (PR) has none active.
 -- =============================================================================
 
@@ -82,12 +82,12 @@ begin
 end
 $$;
 
--- ---- viewer: reads all ------------------------------------------------------
+-- ---- admin: reads all -------------------------------------------------------
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000003', false);
 do $$
 begin
   if (select count(*) from public.actions) <> 2 then
-    raise exception 'FAIL: viewer should read all actions';
+    raise exception 'FAIL: admin should read all actions';
   end if;
 end
 $$;

@@ -116,25 +116,25 @@ drop policy if exists actions_select on public.actions;
 create policy actions_select on public.actions
   for select to authenticated
   using (
-    (select public.active_role()) in ('admin', 'viewer')
-    or ((select public.active_role()) = 'first_aider' and public.is_assigned_to_box(box_id))
+    (select public.active_role()) in ('superadmin', 'admin')
+    or ((select public.active_role()) = 'user' and public.is_assigned_to_box(box_id))
   );
 
 drop policy if exists actions_insert_admin on public.actions;
 create policy actions_insert_admin on public.actions
   for insert to authenticated
-  with check ((select public.active_role()) = 'admin');
+  with check ((select public.active_role()) in ('superadmin', 'admin'));
 
 drop policy if exists actions_update_admin on public.actions;
 create policy actions_update_admin on public.actions
   for update to authenticated
-  using      ((select public.active_role()) = 'admin')
-  with check ((select public.active_role()) = 'admin');
+  using      ((select public.active_role()) in ('superadmin', 'admin'))
+  with check ((select public.active_role()) in ('superadmin', 'admin'));
 
 drop policy if exists actions_delete_admin on public.actions;
 create policy actions_delete_admin on public.actions
   for delete to authenticated
-  using ((select public.active_role()) = 'admin');
+  using ((select public.active_role()) in ('superadmin', 'admin'));
 
 -- anon: nothing. authenticated: only what a policy can allow. Server writes use
 -- the service role (creating actions during inspection submit), bypassing RLS.

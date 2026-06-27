@@ -75,7 +75,11 @@ export function requireRole(ctx: AuthContext, roles: Role[]): void {
   }
 }
 
-/** Active box IDs assigned to a first aider (empty for none). */
+export function isAdminRole(role: Role): boolean {
+  return role === 'superadmin' || role === 'admin';
+}
+
+/** Active box IDs assigned to a standard user (empty for none). */
 export async function getAssignedBoxIds(profileId: string): Promise<string[]> {
   const admin = createAdminClient();
   const { data, error } = await admin
@@ -112,9 +116,8 @@ export async function isAssignedToBox(profileId: string, boxId: string): Promise
 
 /**
  * Authorize access to a specific box for the current action.
- *  - admin: any box
- *  - viewer: read only (write=false)
- *  - first_aider: only boxes they are actively assigned to
+ *  - superadmin/admin: any box
+ *  - user: only boxes they are actively assigned to
  * @throws 403 otherwise.
  */
 export async function requireBoxAccess(
@@ -124,14 +127,9 @@ export async function requireBoxAccess(
 ): Promise<void> {
   const { role } = ctx.profile;
 
-  if (role === 'admin') return;
+  if (isAdminRole(role)) return;
 
-  if (role === 'viewer') {
-    if (opts.write) throw forbidden('Viewers cannot modify data.');
-    return; // read-only access to boxes/reports
-  }
-
-  if (role === 'first_aider') {
+  if (role === 'user') {
     const ok = await isAssignedToBox(ctx.userId, boxId);
     if (!ok) throw forbidden('You are not assigned to this first aid box.');
     return;

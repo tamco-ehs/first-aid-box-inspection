@@ -24,7 +24,7 @@ export function AssignmentsAdmin() {
   const { data, loading, error, reload } = useAsync<Bundle>(async () => {
     const [boxes, aiders, assignments] = await Promise.all([
       sb.from('boxes').select('id, box_code, box_name, location_description, area, template_id, inspection_frequency_days, is_active').eq('is_active', true).order('box_code'),
-      sb.from('profiles').select('id, full_name, employee_id, department, email, role, is_active').eq('role', 'first_aider').eq('is_active', true).order('full_name'),
+      sb.from('profiles').select('id, full_name, employee_id, department, email, role, is_active').eq('role', 'user').eq('is_active', true).order('full_name'),
       sb.from('box_assignments').select('id, box_id, profile_id, is_primary_responsible').eq('is_active', true),
     ]);
     return {
@@ -46,7 +46,7 @@ export function AssignmentsAdmin() {
     const { error } = await sb.from('box_assignments').insert({ box_id: boxId, profile_id: profileId });
     if (error) setMsg({ kind: 'error', text: error.message });
     else {
-      setMsg({ kind: 'ok', text: 'First aider assigned.' });
+      setMsg({ kind: 'ok', text: 'User assigned.' });
       reload();
     }
   }
@@ -67,7 +67,7 @@ export function AssignmentsAdmin() {
     <div className="space-y-4">
       {msg && <Notice kind={msg.kind}>{msg.text}</Notice>}
       {data.aiders.length === 0 && (
-        <Notice kind="error">No active first aiders found. Add users with the first_aider role first.</Notice>
+        <Notice kind="error">No active users found. Add users with the User role first.</Notice>
       )}
       {data.boxes.map((box) => {
         const rows = data.assignments.filter((a) => a.box_id === box.id);
@@ -76,7 +76,7 @@ export function AssignmentsAdmin() {
         return (
           <Section key={box.id} title={`${box.box_code} — ${box.box_name}`}>
             {rows.length === 0 ? (
-              <p className="text-sm text-slate-500">No first aider assigned.</p>
+              <p className="text-sm text-slate-500">No user assigned.</p>
             ) : (
               <ul className="divide-y divide-slate-100">
                 {rows.map((r) => {
@@ -114,7 +114,7 @@ export function AssignmentsAdmin() {
                     e.target.value = '';
                   }}
                 >
-                  <option value="">+ Assign a first aider…</option>
+                  <option value="">+ Assign a user...</option>
                   {available.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.full_name}

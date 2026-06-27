@@ -14,6 +14,7 @@ const uuid = z.string().uuid();
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
+const appRole = z.enum(['superadmin', 'admin', 'user']);
 
 // --- POST /api/inspections (quick inspection + conditional item check) --------
 export const itemCheckInput = z
@@ -118,6 +119,36 @@ export const itemPhotoSchema = z
   .refine((v) => Boolean(v.template_item_id) !== Boolean(v.box_item_id), {
     message: 'Provide exactly one of template_item_id or box_item_id.',
   });
+
+// --- /api/admin/users --------------------------------------------------------
+export const adminUserCreateSchema = z
+  .object({
+    email: z.string().trim().email().max(254),
+    password: z.string().min(8).max(72),
+    full_name: z.string().trim().min(1).max(120),
+    employee_id: z.string().trim().regex(/^[A-Za-z0-9_-]{2,32}$/).nullish(),
+    department: z.string().trim().max(120).nullish(),
+    role: appRole,
+    is_active: z.boolean().default(true),
+  })
+  .strict();
+
+export const adminUserUpdateSchema = z
+  .object({
+    id: uuid,
+    full_name: z.string().trim().min(1).max(120).optional(),
+    employee_id: z.string().trim().regex(/^[A-Za-z0-9_-]{2,32}$/).nullable().optional(),
+    department: z.string().trim().max(120).nullable().optional(),
+    role: appRole.optional(),
+    is_active: z.boolean().optional(),
+  })
+  .strict();
+
+export const adminUserDeleteSchema = z
+  .object({
+    id: uuid,
+  })
+  .strict();
 
 // --- GET /api/reports (query params) -----------------------------------------
 export const reportsQuerySchema = z

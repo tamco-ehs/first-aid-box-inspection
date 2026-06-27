@@ -41,9 +41,9 @@ export default function LoginPage() {
       return;
     }
 
-    // ESH team (admin) + viewer land on the readiness dashboard; first aiders
-    // go to their home (which lists assigned boxes, including an empty state).
-    if (me.role === 'admin' || me.role === 'viewer') return router.replace('/reports');
+    // EHS admin roles land on the readiness dashboard; standard users go to
+    // their home page with assigned boxes.
+    if (me.role === 'superadmin' || me.role === 'admin') return router.replace('/reports');
     return router.replace('/home');
   }
 

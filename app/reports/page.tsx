@@ -20,7 +20,7 @@ interface BoxLite {
 type Tab = 'inspections' | 'actions' | 'usage';
 
 export default function ReportsPage() {
-  return <RequireAuth roles={['admin', 'viewer']}>{(me) => <Dashboard me={me} />}</RequireAuth>;
+  return <RequireAuth roles={['superadmin', 'admin']}>{(me) => <Dashboard me={me} />}</RequireAuth>;
 }
 
 function Dashboard({ me }: { me: Me }) {
@@ -85,7 +85,7 @@ function Dashboard({ me }: { me: Me }) {
 
         {data && !loading && (
           <>
-            <Cards d={data.dashboard} canOpenAdmin={me.role === 'admin'} onOpenTab={openReportTab} />
+            <Cards d={data.dashboard} canOpenAdmin={me.role === 'superadmin' || me.role === 'admin'} onOpenTab={openReportTab} />
 
             {false && data && (
               <div className="hidden">

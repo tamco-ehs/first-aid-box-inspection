@@ -9,7 +9,7 @@ export function EshNav({ role }: { role: Role }) {
   const links = [
     { href: '/reports', label: 'Dashboard' },
     { href: '/actions', label: 'Actions' },
-    ...(role === 'admin' ? [{ href: '/admin', label: 'Admin' }] : []),
+    ...(role === 'superadmin' || role === 'admin' ? [{ href: '/admin', label: 'Admin' }] : []),
   ];
   return (
     <div className="flex gap-1">

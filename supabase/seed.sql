@@ -171,7 +171,7 @@ select public.apply_template_to_box('22222222-2222-4222-8222-222222222222') as p
 --
 --   Step 1: Supabase Dashboard > Authentication > Users > "Add user"
 --           (use "Auto Confirm User"). The on_auth_user_created trigger
---           instantly creates a profile with role 'viewer' and
+--           instantly creates a profile with role 'user' and
 --           is_active = false - deliberately useless until promoted.
 --   Step 2: Copy each user's UUID from the dashboard.
 --   Step 3: Replace the placeholder UUIDs below and run these statements.
@@ -179,21 +179,21 @@ select public.apply_template_to_box('22222222-2222-4222-8222-222222222222') as p
 -- The placeholder updates below match ZERO rows as-is, so running this file
 -- unchanged is harmless.
 
--- ADMIN placeholder
+-- SUPERADMIN placeholder
 update public.profiles
    set full_name   = 'Admin Name',
        employee_id = 'EMP-0001',
        department  = 'EHS',
-       role        = 'admin',
+       role        = 'superadmin',
        is_active   = true
  where id = '00000000-0000-0000-0000-000000000000';  -- <-- replace with the real auth user UUID
 
--- FIRST AIDER placeholder
+-- USER placeholder
 update public.profiles
-   set full_name   = 'First Aider Name',
+   set full_name   = 'User Name',
        employee_id = 'EMP-0002',
        department  = 'Production',
-       role        = 'first_aider',
+       role        = 'user',
        is_active   = true
  where id = '00000000-0000-0000-0000-000000000000';  -- <-- replace with the real auth user UUID
 

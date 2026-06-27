@@ -4,7 +4,7 @@
 // the box's readiness.
 //
 // Security (unchanged from before): authenticated + active, role admin or
-// first_aider, box active, and (first_aider) assigned to the box. All writes go
+// user/admin, box active, and (user) assigned to the box. All writes go
 // through the service role after those checks; the inspection is rolled back on
 // any post-insert failure.
 
@@ -54,7 +54,7 @@ function itemKey(name: string, t: string) {
 export async function POST(req: Request): Promise<Response> {
   return safe(async () => {
     const ctx = await requireActive();
-    requireRole(ctx, ['admin', 'first_aider']);
+    requireRole(ctx, ['superadmin', 'admin', 'user']);
 
     const parsed = quickInspectionSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) throw badRequest(firstZodMessage(parsed.error));

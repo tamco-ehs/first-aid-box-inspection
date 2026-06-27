@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request): Promise<Response> {
   return safe(async () => {
     const ctx = await requireActive();
-    requireRole(ctx, ['admin']);
+    requireRole(ctx, ['superadmin', 'admin']);
 
     const parsed = actionCloseSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) throw badRequest(firstZodMessage(parsed.error));

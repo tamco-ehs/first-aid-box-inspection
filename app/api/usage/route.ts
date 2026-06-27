@@ -4,7 +4,7 @@
 //   true  -> public can submit WITHOUT login (factory staff at a box). Still
 //            validated, honeypot-guarded, and rate-limited per salted IP hash
 //            plus a global hourly cap. Nobody can ever READ logs without login
-//            (no select policy for anon/first_aider; admin/viewer only).
+//            (no select policy for anon/user; admin/superadmin only).
 //   false -> an active login is required to submit.
 //
 // Writes use the service role because there is deliberately NO insert policy on

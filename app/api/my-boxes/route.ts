@@ -1,7 +1,7 @@
 // GET /api/my-boxes - the boxes the caller may act on, each with its inspection
 // due status, sorted Overdue -> Due Soon -> Not Yet Inspected -> Completed.
-//   admin / viewer : all active boxes
-//   first_aider    : only actively-assigned boxes (auto-preselect when 1)
+//   superadmin/admin : all active boxes
+//   user             : only actively-assigned boxes (auto-preselect when 1)
 
 import { getAssignedBoxIds, requireActive } from '@/lib/auth';
 import { jsonOk, safe } from '@/lib/http';
@@ -39,7 +39,7 @@ export async function GET(): Promise<Response> {
       .select('id, box_code, box_name, location_description, area, inspection_frequency_days, created_at')
       .eq('is_active', true);
 
-    if (ctx.profile.role === 'first_aider') {
+    if (ctx.profile.role === 'user') {
       const assignedIds = await getAssignedBoxIds(ctx.userId);
       if (assignedIds.length === 0) {
         return jsonOk({ role: ctx.profile.role, count: 0, boxes: [] });

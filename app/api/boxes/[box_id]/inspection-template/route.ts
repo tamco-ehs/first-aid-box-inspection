@@ -2,7 +2,7 @@
 // form is generated from: box details, template, every active box item (with
 // its effective reference photo and current known state), and a short summary
 // of the last inspection.
-//   admin: any active box | first_aider: assigned only | viewer: read-only
+//   superadmin/admin: any active box | user: assigned only
 // Anyone else -> 403 (handled inside requireBoxAccess).
 
 import { requireActive, requireBoxAccess } from '@/lib/auth';

@@ -25,24 +25,28 @@ const TABS: [Tab, string][] = [
 ];
 
 export default function AdminPage() {
-  return <RequireAuth roles={['admin']}>{(me) => <Admin me={me} />}</RequireAuth>;
+  return <RequireAuth roles={['superadmin', 'admin']}>{(me) => <Admin me={me} />}</RequireAuth>;
 }
 
 function Admin({ me }: { me: Me }) {
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const [tab, setTab] = useState<Tab>(() => (isTab(requestedTab) ? requestedTab : 'boxes'));
+  const visibleTabs = me.role === 'superadmin' ? TABS : TABS.filter(([key]) => key !== 'users');
+  const [tab, setTab] = useState<Tab>(() =>
+    isTab(requestedTab) && (requestedTab !== 'users' || me.role === 'superadmin') ? requestedTab : 'boxes',
+  );
 
   useEffect(() => {
-    if (isTab(requestedTab)) setTab(requestedTab);
-  }, [requestedTab]);
+    if (!isTab(requestedTab)) return;
+    setTab(requestedTab !== 'users' || me.role === 'superadmin' ? requestedTab : 'boxes');
+  }, [me.role, requestedTab]);
 
   return (
     <>
       <AppHeader title="Admin" subtitle={me.full_name} right={<EshNav role={me.role} />} />
       <main className="mx-auto max-w-5xl space-y-4 p-4">
         <div className="flex flex-wrap gap-2">
-          {TABS.map(([key, label]) => (
+          {visibleTabs.map(([key, label]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -58,7 +62,7 @@ function Admin({ me }: { me: Me }) {
         {tab === 'template' && <TemplateAdmin />}
         {tab === 'box-items' && <BoxItemsAdmin />}
         {tab === 'expiring-items' && <ExpiringItemsAdmin />}
-        {tab === 'users' && <UsersAdmin />}
+        {tab === 'users' && me.role === 'superadmin' && <UsersAdmin />}
       </main>
     </>
   );

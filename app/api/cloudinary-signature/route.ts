@@ -1,7 +1,7 @@
 // POST /api/cloudinary-signature - hand the browser a short-lived signature so
 // it can upload directly to Cloudinary WITHOUT ever seeing the API secret.
-//   - inspection photos:     first_aider or admin
-//   - item reference photos: admin only
+//   - inspection photos:     user/admin/superadmin
+//   - item reference photos: admin/superadmin only
 // The upload folder is fixed server-side; the client cannot choose it.
 
 import { requireActive, requireRole } from '@/lib/auth';
@@ -24,9 +24,9 @@ export async function POST(req: Request): Promise<Response> {
 
     // Authorize per upload type BEFORE issuing a signature.
     if (upload_type === 'item_reference') {
-      requireRole(ctx, ['admin']);
+      requireRole(ctx, ['superadmin', 'admin']);
     } else {
-      requireRole(ctx, ['admin', 'first_aider']);
+      requireRole(ctx, ['superadmin', 'admin', 'user']);
     }
 
     const folder = FOLDER_BY_UPLOAD_TYPE[upload_type];

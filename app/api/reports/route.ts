@@ -1,4 +1,4 @@
-// GET /api/reports - ESH dashboard + report lists. admin + viewer only.
+// GET /api/reports - EHS dashboard + report lists. superadmin + admin only.
 // Returns: the readiness dashboard, Needs Attention Today,
 // a compliance summary, a 6-month trend, and filtered lists (inspections,
 // actions, usage logs) for the report tabs + CSV export.
@@ -206,7 +206,7 @@ function buildActionMonthly(actions: ActionMonthlyRow[], now: Date) {
 export async function GET(req: Request): Promise<Response> {
   return safe(async () => {
     const ctx = await requireActive();
-    requireRole(ctx, ['admin', 'viewer']);
+    requireRole(ctx, ['superadmin', 'admin']);
 
     const url = new URL(req.url);
     const parsed = reportsQuerySchema.safeParse(Object.fromEntries(url.searchParams.entries()));

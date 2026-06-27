@@ -30,7 +30,7 @@ const QUESTIONS = [
 export default function InspectPage() {
   const params = useParams<{ box_id: string }>();
   return (
-    <RequireAuth roles={['admin', 'first_aider']}>
+    <RequireAuth roles={['superadmin', 'admin', 'user']}>
       {(me) => <Inspect me={me} boxId={params.box_id} />}
     </RequireAuth>
   );

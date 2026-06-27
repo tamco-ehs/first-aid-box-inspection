@@ -19,7 +19,7 @@
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-4000-8000-000000000001', 'alice.admin@example.com',  '{"full_name": "Alice Admin"}'),
   ('00000000-0000-4000-8000-000000000002', 'fred.aider@example.com',   '{"full_name": "Fred Aider"}'),
-  ('00000000-0000-4000-8000-000000000003', 'vera.viewer@example.com',  '{"full_name": "Vera Viewer"}'),
+  ('00000000-0000-4000-8000-000000000003', 'vera.admin@example.com',   '{"full_name": "Vera Admin"}'),
   ('00000000-0000-4000-8000-000000000004', 'ina.inactive@example.com', '{"full_name": "Ina Inactive"}'),
   ('00000000-0000-4000-8000-000000000005', 'farid.multi@example.com',  '{"full_name": "Farid Multi"}');
 
@@ -29,8 +29,8 @@ begin
   if (select count(*) from public.profiles) <> 5 then
     raise exception 'FAIL: handle_new_user trigger did not create 5 profiles';
   end if;
-  if exists (select 1 from public.profiles where role <> 'viewer' or is_active) then
-    raise exception 'FAIL: new profiles must default to INACTIVE viewer';
+  if exists (select 1 from public.profiles where role <> 'user' or is_active) then
+    raise exception 'FAIL: new profiles must default to INACTIVE user';
   end if;
   if (select email from public.profiles where id = '00000000-0000-4000-8000-000000000001')
        <> 'alice.admin@example.com' then
@@ -43,12 +43,12 @@ begin
 end
 $$;
 
--- Promote test users (this is what an admin does after creating accounts).
-update public.profiles set role = 'admin',       is_active = true, employee_id = 'EMP-0001', department = 'EHS'        where id = '00000000-0000-4000-8000-000000000001';
-update public.profiles set role = 'first_aider', is_active = true, employee_id = 'EMP-0002', department = 'Production' where id = '00000000-0000-4000-8000-000000000002';
-update public.profiles set role = 'viewer',      is_active = true, employee_id = 'EMP-0003', department = 'HR'         where id = '00000000-0000-4000-8000-000000000003';
-update public.profiles set role = 'first_aider', is_active = true, employee_id = 'EMP-0005', department = 'Warehouse'  where id = '00000000-0000-4000-8000-000000000005';
--- 0004 stays an inactive viewer on purpose.
+-- Promote test users (this is what a superadmin does after creating accounts).
+update public.profiles set role = 'superadmin', is_active = true, employee_id = 'EMP-0001', department = 'EHS'        where id = '00000000-0000-4000-8000-000000000001';
+update public.profiles set role = 'user',       is_active = true, employee_id = 'EMP-0002', department = 'Production' where id = '00000000-0000-4000-8000-000000000002';
+update public.profiles set role = 'admin',      is_active = true, employee_id = 'EMP-0003', department = 'HR'         where id = '00000000-0000-4000-8000-000000000003';
+update public.profiles set role = 'user',       is_active = true, employee_id = 'EMP-0005', department = 'Warehouse'  where id = '00000000-0000-4000-8000-000000000005';
+-- 0004 stays an inactive user on purpose.
 
 -- IDs an attacker might guess; stored in a helper table so role-switched
 -- blocks can reference them. Dropped at the end.
@@ -462,7 +462,7 @@ $$;
 reset role;
 
 -- =============================================================================
--- 7. VISIBILITY MATRIX: viewer, first aiders, inactive user
+-- 7. VISIBILITY MATRIX: admin, users, inactive user
 -- =============================================================================
 set role authenticated;
 
@@ -491,37 +491,42 @@ begin
 end
 $$;
 
--- Vera the viewer: read-only reports, no master data, no writes
+-- Vera the admin: normal admin data access, but no profile/user-ID management
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000003', false);
 do $$
 declare
   n integer;
 begin
-  if (select count(*) from public.boxes) <> 3 then raise exception 'FAIL: viewer should see all 3 active boxes'; end if;
-  if (select count(*) from public.inspections) <> 1 then raise exception 'FAIL: viewer should see all inspections'; end if;
-  if (select count(*) from public.inspection_items) <> 1 then raise exception 'FAIL: viewer should see all inspection lines'; end if;
-  if (select count(*) from public.topup_requests) <> 1 then raise exception 'FAIL: viewer should see all top-ups'; end if;
-  if (select count(*) from public.first_aid_usage_logs) <> 1 then raise exception 'FAIL: viewer should see usage logs'; end if;
-  if (select count(*) from public.first_aid_kit_templates) <> 0 then raise exception 'FAIL: viewer should not see templates'; end if;
-  if (select count(*) from public.first_aid_kit_template_items) <> 0 then raise exception 'FAIL: viewer should not see template items'; end if;
-  if (select count(*) from public.box_items) <> 0 then raise exception 'FAIL: viewer should not see box items'; end if;
-  if (select count(*) from public.reminder_logs) <> 0 then raise exception 'FAIL: viewer should not see reminder logs'; end if;
+  if (select count(*) from public.profiles) <> 1 then raise exception 'FAIL: admin should see only their own profile'; end if;
+  if (select count(*) from public.boxes) <> 3 then raise exception 'FAIL: admin should see all 3 active boxes'; end if;
+  if (select count(*) from public.inspections) <> 1 then raise exception 'FAIL: admin should see all inspections'; end if;
+  if (select count(*) from public.inspection_items) <> 1 then raise exception 'FAIL: admin should see all inspection lines'; end if;
+  if (select count(*) from public.topup_requests) <> 1 then raise exception 'FAIL: admin should see all top-ups'; end if;
+  if (select count(*) from public.first_aid_usage_logs) <> 1 then raise exception 'FAIL: admin should see usage logs'; end if;
+  if (select count(*) from public.first_aid_kit_templates) <> 1 then raise exception 'FAIL: admin should see templates'; end if;
+  if (select count(*) from public.first_aid_kit_template_items) <> 22 then raise exception 'FAIL: admin should see template items'; end if;
+  if (select count(*) from public.box_items) <> 66 then raise exception 'FAIL: admin should see box items'; end if;
+  if (select count(*) from public.reminder_logs) <> 1 then raise exception 'FAIL: admin should see reminder logs'; end if;
 
   begin
     insert into public.inspections (box_id, inspector_id, inspector_name, overall_status)
-    values ('11111111-1111-4111-8111-111111111111', (select auth.uid()), 'Vera Viewer', 'Pass');
-    raise exception 'FAIL: a viewer submitted an inspection';
+    values ('11111111-1111-4111-8111-111111111111', (select auth.uid()), 'Vera Admin', 'Pass');
+    raise exception 'FAIL: an admin submitted an inspection directly through RLS';
   exception
     when insufficient_privilege then null;  -- expected
   end;
 
-  update public.boxes set box_name = 'tampered' where true;
+  update public.profiles set role = 'superadmin' where id = '00000000-0000-4000-8000-000000000002';
   get diagnostics n = row_count;
-  if n <> 0 then raise exception 'FAIL: a viewer edited a box'; end if;
+  if n <> 0 then raise exception 'FAIL: admin changed a user role'; end if;
 
-  update public.topup_requests set status = 'Completed' where true;
+  update public.boxes set box_name = box_name where true;
   get diagnostics n = row_count;
-  if n <> 0 then raise exception 'FAIL: a viewer updated a top-up request'; end if;
+  if n <> 3 then raise exception 'FAIL: admin could not edit boxes'; end if;
+
+  update public.topup_requests set status = status where true;
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'FAIL: admin could not update a top-up request'; end if;
 end
 $$;
 

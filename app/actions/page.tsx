@@ -25,8 +25,8 @@ export default function ActionsPage() {
 }
 
 function Actions({ me }: { me: Me }) {
-  const isEsh = me.role === 'admin' || me.role === 'viewer';
-  const canClose = me.role === 'admin';
+  const isEsh = me.role === 'superadmin' || me.role === 'admin';
+  const canClose = isEsh;
   const [status, setStatus] = useState<string>('Open');
   const [data, setData] = useState<ActionsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -1,5 +1,5 @@
-// GET /api/actions - ESH action list. admin/viewer see all; first_aider sees
-// actions for their assigned boxes. Defaults to Open + In Progress.
+// GET /api/actions - EHS action list. superadmin/admin see all; user sees
+// actions for assigned boxes. Defaults to Open + In Progress.
 //
 // Box info is joined in code (not via a PostgREST embed) so the list does not
 // depend on PostgREST having cached the actions->boxes relationship.
@@ -43,7 +43,7 @@ export async function GET(req: Request): Promise<Response> {
     if (f.box_id) q = q.eq('box_id', f.box_id);
     if (f.category) q = q.eq('category', f.category);
 
-    if (ctx.profile.role === 'first_aider') {
+    if (ctx.profile.role === 'user') {
       const ids = await getAssignedBoxIds(ctx.userId);
       if (ids.length === 0) return jsonOk({ actions: [] });
       q = q.in('box_id', ids);

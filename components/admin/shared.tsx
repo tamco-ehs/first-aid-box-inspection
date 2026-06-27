@@ -22,7 +22,7 @@ export interface AdminProfile {
   employee_id: string | null;
   department: string | null;
   email: string | null;
-  role: 'admin' | 'first_aider' | 'viewer';
+  role: 'superadmin' | 'admin' | 'user';
   is_active: boolean;
 }
 
