@@ -12,6 +12,15 @@ export interface EmailResult {
   error?: string;
 }
 
+type Tone = 'green' | 'red' | 'amber' | 'blue';
+
+const tones: Record<Tone, { fg: string; bg: string; border: string }> = {
+  green: { fg: '#047857', bg: '#ecfdf5', border: '#a7f3d0' },
+  red: { fg: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
+  amber: { fg: '#b45309', bg: '#fffbeb', border: '#fde68a' },
+  blue: { fg: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
+};
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -64,62 +73,6 @@ export interface ReminderContext {
   boxId: string;
 }
 
-function inspectLink(boxId: string): string {
-  return `${PUBLIC_ENV.appUrl()}/inspect/${boxId}`;
-}
-
-/** First-aider reminder email. */
-export function buildReminderEmail(ctx: ReminderContext): {
-  subject: string;
-  html: string;
-  text: string;
-} {
-  const link = inspectLink(ctx.boxId);
-  const subject = `First Aid Box Inspection Reminder: ${ctx.boxName}`;
-  const text =
-    `Reminder: Your inspection for ${ctx.boxName} is overdue by ${ctx.daysOverdue} days. ` +
-    `Please complete your check as soon as possible.\n\n` +
-    `Box: ${ctx.boxName}\nLocation: ${ctx.location}\nDays overdue: ${ctx.daysOverdue}\n` +
-    `Inspect: ${link}\n`;
-  const html = `
-    <div style="font-family:system-ui,sans-serif;max-width:560px">
-      <h2 style="margin:0 0 12px">First Aid Box Inspection Reminder</h2>
-      <p>Reminder: Your inspection for <strong>${escapeHtml(ctx.boxName)}</strong> is overdue by
-         <strong>${ctx.daysOverdue} days</strong>. Please complete your check as soon as possible.</p>
-      <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:4px 12px 4px 0;color:#555">Box</td><td>${escapeHtml(ctx.boxName)}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0;color:#555">Location</td><td>${escapeHtml(ctx.location)}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0;color:#555">Days overdue</td><td>${ctx.daysOverdue}</td></tr>
-      </table>
-      <p><a href="${escapeHtml(link)}"
-            style="background:#dc2626;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">
-         Complete inspection</a></p>
-    </div>`;
-  return { subject, html, text };
-}
-
-/** Escalation email to admin/EHS at the 28-day milestone. */
-export function buildEscalationEmail(ctx: ReminderContext): {
-  subject: string;
-  html: string;
-  text: string;
-} {
-  const link = inspectLink(ctx.boxId);
-  const subject = `ESCALATION - First Aid Box overdue ${ctx.daysOverdue} days: ${ctx.boxName}`;
-  const text =
-    `Escalation: ${ctx.boxName} (${ctx.location}) has been overdue for ${ctx.daysOverdue} days ` +
-    `without an inspection. Please follow up with the assigned first aider.\n\nInspect: ${link}\n`;
-  const html = `
-    <div style="font-family:system-ui,sans-serif;max-width:560px">
-      <h2 style="margin:0 0 12px;color:#b91c1c">First Aid Box Overdue - Escalation</h2>
-      <p><strong>${escapeHtml(ctx.boxName)}</strong> (${escapeHtml(ctx.location)}) has been overdue for
-         <strong>${ctx.daysOverdue} days</strong> with no completed inspection.</p>
-      <p>Please follow up with the assigned first aider or reassign the box.</p>
-      <p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>
-    </div>`;
-  return { subject, html, text };
-}
-
 export interface ReminderSummaryItem {
   title: string;
   boxName: string;
@@ -139,22 +92,165 @@ export interface ActionSummaryItem {
   link: string;
 }
 
+function inspectLink(boxId: string): string {
+  return `${PUBLIC_ENV.appUrl()}/inspect/${boxId}`;
+}
+
+function emailShell(ctx: {
+  title: string;
+  preheader: string;
+  introHtml: string;
+  bodyHtml: string;
+  tone?: Tone;
+  ctaHref?: string;
+  ctaLabel?: string;
+}): string {
+  const tone = tones[ctx.tone ?? 'green'];
+  const cta =
+    ctx.ctaHref && ctx.ctaLabel
+      ? `<p style="margin:24px 0 0">
+          <a href="${escapeHtml(ctx.ctaHref)}" style="display:inline-block;background:#16a34a;color:#ffffff;text-decoration:none;font-weight:700;border-radius:8px;padding:12px 18px">
+            ${escapeHtml(ctx.ctaLabel)}
+          </a>
+        </p>`
+      : '';
+
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#0f172a">
+    <span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;overflow:hidden">${escapeHtml(ctx.preheader)}</span>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 12px">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:680px;background:#ffffff;border:1px solid #dbe5ef;border-radius:12px;overflow:hidden">
+            <tr>
+              <td style="padding:22px 24px;border-top:5px solid ${tone.fg}">
+                <p style="margin:0 0 8px;color:#475569;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase">First Aid Box Inspection</p>
+                <h1 style="margin:0;color:#0f172a;font-size:22px;line-height:1.3">${escapeHtml(ctx.title)}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 24px 24px">
+                <div style="border:1px solid ${tone.border};background:${tone.bg};border-radius:10px;padding:14px 16px;margin-bottom:18px;color:${tone.fg};font-size:14px;line-height:1.5">
+                  ${ctx.introHtml}
+                </div>
+                ${ctx.bodyHtml}
+                ${cta}
+                <p style="margin:24px 0 0;color:#64748b;font-size:12px;line-height:1.5">
+                  This is an automated reminder from the First Aid Box Inspection System.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function detailTableHtml(rows: Array<{ label: string; value: string | number | null | undefined }>): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+    ${rows
+      .map(
+        (row) => `<tr>
+          <td style="width:34%;padding:10px 12px;border-bottom:1px solid #e2e8f0;background:#f8fafc;color:#475569;font-size:13px;font-weight:700">${escapeHtml(row.label)}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:13px">${escapeHtml(String(row.value ?? 'Not set'))}</td>
+        </tr>`,
+      )
+      .join('')}
+  </table>`;
+}
+
+function badgeHtml(label: string, tone: Tone): string {
+  const t = tones[tone];
+  return `<span style="display:inline-block;border:1px solid ${t.border};background:${t.bg};color:${t.fg};font-size:11px;font-weight:700;border-radius:999px;padding:3px 8px">${escapeHtml(label)}</span>`;
+}
+
+function statusTone(status: string): Tone {
+  const normalized = status.toLowerCase();
+  if (normalized.includes('overdue') || normalized.includes('expired')) return 'red';
+  if (normalized.includes('today') || normalized.includes('due in') || normalized.includes('expires in')) return 'amber';
+  return 'blue';
+}
+
+/** First-aider single inspection reminder email. */
+export function buildReminderEmail(ctx: ReminderContext): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const link = inspectLink(ctx.boxId);
+  const subject = `First Aid Box Inspection Reminder: ${ctx.boxName}`;
+  const text =
+    `Reminder: Your inspection for ${ctx.boxName} is overdue by ${ctx.daysOverdue} days. ` +
+    `Please complete your check as soon as possible.\n\n` +
+    `Box: ${ctx.boxName}\nLocation: ${ctx.location}\nDays overdue: ${ctx.daysOverdue}\n` +
+    `Inspect: ${link}\n`;
+  const html = emailShell({
+    title: 'Inspection overdue',
+    preheader: `${ctx.boxName} is overdue by ${ctx.daysOverdue} days.`,
+    tone: 'red',
+    introHtml: `Your inspection for <strong>${escapeHtml(ctx.boxName)}</strong> is overdue by <strong>${ctx.daysOverdue} day${ctx.daysOverdue === 1 ? '' : 's'}</strong>.`,
+    bodyHtml: detailTableHtml([
+      { label: 'Box', value: ctx.boxName },
+      { label: 'Location', value: ctx.location },
+      { label: 'Days overdue', value: ctx.daysOverdue },
+    ]),
+    ctaHref: link,
+    ctaLabel: 'Complete inspection',
+  });
+  return { subject, html, text };
+}
+
+/** Escalation email to admin/EHS at the 28-day milestone. */
+export function buildEscalationEmail(ctx: ReminderContext): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const link = inspectLink(ctx.boxId);
+  const subject = `ESCALATION - First Aid Box overdue ${ctx.daysOverdue} days: ${ctx.boxName}`;
+  const text =
+    `Escalation: ${ctx.boxName} (${ctx.location}) has been overdue for ${ctx.daysOverdue} days ` +
+    `without an inspection. Please follow up with the assigned first aider.\n\nInspect: ${link}\n`;
+  const html = emailShell({
+    title: 'Inspection escalation',
+    preheader: `${ctx.boxName} has been overdue for ${ctx.daysOverdue} days.`,
+    tone: 'red',
+    introHtml: `<strong>${escapeHtml(ctx.boxName)}</strong> has been overdue for <strong>${ctx.daysOverdue} day${ctx.daysOverdue === 1 ? '' : 's'}</strong>. Please follow up with the assigned First Aider or reassign the box.`,
+    bodyHtml: detailTableHtml([
+      { label: 'Box', value: ctx.boxName },
+      { label: 'Location', value: ctx.location },
+      { label: 'Days overdue', value: ctx.daysOverdue },
+    ]),
+    ctaHref: link,
+    ctaLabel: 'Open inspection',
+  });
+  return { subject, html, text };
+}
+
 function listHtml(items: ReminderSummaryItem[]): string {
-  return `
-    <ul style="padding-left:18px">
-      ${items
-        .map(
-          (item) => `
-            <li style="margin:0 0 12px">
-              <strong>${escapeHtml(item.title)}</strong><br/>
-              <span>${escapeHtml(item.boxName)} - ${escapeHtml(item.location)}</span><br/>
-              <span>Status: ${escapeHtml(item.status)}</span><br/>
-              <span>${escapeHtml(item.detail)}</span><br/>
-              <a href="${escapeHtml(item.link)}">${escapeHtml(item.link)}</a>
-            </li>`,
-        )
-        .join('')}
-    </ul>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 10px">
+    ${items
+      .map(
+        (item) => `<tr>
+          <td style="border:1px solid #e2e8f0;border-radius:10px;padding:14px;background:#ffffff">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:15px;font-weight:700;color:#0f172a">${escapeHtml(item.title)}</td>
+                <td align="right">${badgeHtml(item.status, statusTone(item.status))}</td>
+              </tr>
+            </table>
+            <p style="margin:6px 0 0;color:#334155;font-size:13px">${escapeHtml(item.boxName)}</p>
+            <p style="margin:2px 0 8px;color:#64748b;font-size:12px">${escapeHtml(item.location)}</p>
+            <p style="margin:0 0 8px;color:#334155;font-size:13px">${escapeHtml(item.detail)}</p>
+            <a href="${escapeHtml(item.link)}" style="color:#16a34a;font-size:13px;font-weight:700;text-decoration:none">Open item</a>
+          </td>
+        </tr>`,
+      )
+      .join('')}
+  </table>`;
 }
 
 function listText(items: ReminderSummaryItem[]): string {
@@ -171,6 +267,30 @@ function listText(items: ReminderSummaryItem[]): string {
     .join('\n\n');
 }
 
+function actionListHtml(actions: ActionSummaryItem[]): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 10px">
+    ${actions
+      .map((action) => {
+        const title = `${action.actionType}${action.itemName ? ` - ${action.itemName}` : ''}`;
+        return `<tr>
+          <td style="border:1px solid #e2e8f0;border-radius:10px;padding:14px;background:#ffffff">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:15px;font-weight:700;color:#0f172a">${escapeHtml(title)}</td>
+                <td align="right">${badgeHtml(action.priority ?? 'Priority not set', action.priority === 'High' ? 'red' : 'amber')}</td>
+              </tr>
+            </table>
+            <p style="margin:6px 0 0;color:#334155;font-size:13px">Code: ${escapeHtml(action.actionCode)}</p>
+            <p style="margin:2px 0 0;color:#334155;font-size:13px">${escapeHtml(action.boxName)}</p>
+            <p style="margin:2px 0 8px;color:#64748b;font-size:12px">${escapeHtml(action.location)}</p>
+            <a href="${escapeHtml(action.link)}" style="color:#16a34a;font-size:13px;font-weight:700;text-decoration:none">Open action</a>
+          </td>
+        </tr>`;
+      })
+      .join('')}
+  </table>`;
+}
+
 export function buildAssignedReminderSummaryEmail(ctx: {
   recipientName: string | null;
   items: ReminderSummaryItem[];
@@ -180,13 +300,15 @@ export function buildAssignedReminderSummaryEmail(ctx: {
   const text =
     `${greeting}\n\nThe following assigned first aid checks are almost due or already due:\n\n` +
     `${listText(ctx.items)}\n`;
-  const html = `
-    <div style="font-family:system-ui,sans-serif;max-width:640px">
-      <h2 style="margin:0 0 12px">First Aid reminders</h2>
-      <p>${escapeHtml(greeting)}</p>
-      <p>The following assigned first aid checks are almost due or already due:</p>
-      ${listHtml(ctx.items)}
-    </div>`;
+  const html = emailShell({
+    title: 'Assigned reminders',
+    preheader: `${ctx.items.length} assigned first aid check${ctx.items.length === 1 ? '' : 's'} need attention.`,
+    tone: 'amber',
+    introHtml: `${escapeHtml(greeting)}<br/>The following assigned first aid checks are almost due or already due.`,
+    bodyHtml: listHtml(ctx.items),
+    ctaHref: ctx.items[0]?.link,
+    ctaLabel: 'Open first item',
+  });
   return { subject, html, text };
 }
 
@@ -197,12 +319,15 @@ export function buildAdminDueSummaryEmail(ctx: {
   const text =
     `Admin summary: the following inspections or items are almost due or already due:\n\n` +
     `${listText(ctx.items)}\n`;
-  const html = `
-    <div style="font-family:system-ui,sans-serif;max-width:640px">
-      <h2 style="margin:0 0 12px">First Aid due summary</h2>
-      <p>The following inspections or items are almost due or already due:</p>
-      ${listHtml(ctx.items)}
-    </div>`;
+  const html = emailShell({
+    title: 'Admin due summary',
+    preheader: `${ctx.items.length} inspection or item reminder${ctx.items.length === 1 ? '' : 's'} need attention.`,
+    tone: 'amber',
+    introHtml: `The following inspections or items are almost due or already due across all active boxes.`,
+    bodyHtml: listHtml(ctx.items),
+    ctaHref: `${PUBLIC_ENV.appUrl()}/reports`,
+    ctaLabel: 'Open dashboard',
+  });
   return { subject, html, text };
 }
 
@@ -224,24 +349,14 @@ export function buildAdminActionSummaryEmail(ctx: {
       )
       .join('\n\n') +
     '\n';
-  const html = `
-    <div style="font-family:system-ui,sans-serif;max-width:680px">
-      <h2 style="margin:0 0 12px">First Aid required action summary</h2>
-      <p>The following required action items are open or in progress:</p>
-      <ul style="padding-left:18px">
-        ${ctx.actions
-          .map(
-            (action) => `
-              <li style="margin:0 0 12px">
-                <strong>${escapeHtml(action.actionType)}${action.itemName ? ` - ${escapeHtml(action.itemName)}` : ''}</strong><br/>
-                <span>Code: ${escapeHtml(action.actionCode)}</span><br/>
-                <span>${escapeHtml(action.boxName)} - ${escapeHtml(action.location)}</span><br/>
-                <span>Priority: ${escapeHtml(action.priority ?? 'Not set')}</span><br/>
-                <a href="${escapeHtml(action.link)}">${escapeHtml(action.link)}</a>
-              </li>`,
-          )
-          .join('')}
-      </ul>
-    </div>`;
+  const html = emailShell({
+    title: 'Required action summary',
+    preheader: `${ctx.actions.length} required action${ctx.actions.length === 1 ? '' : 's'} are open or in progress.`,
+    tone: 'red',
+    introHtml: `The following required action items are open or in progress. They are consolidated into this single admin email.`,
+    bodyHtml: actionListHtml(ctx.actions),
+    ctaHref: `${PUBLIC_ENV.appUrl()}/actions`,
+    ctaLabel: 'Open actions',
+  });
   return { subject, html, text };
 }
