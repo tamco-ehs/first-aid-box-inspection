@@ -70,13 +70,13 @@ function buildTestMessages(recipientName: string | null): TestMessage[] {
   const actions = sampleActionItems(appUrl);
   const singleReminder = buildReminderEmail({
     boxId: '00000000-0000-4000-8000-000000000001',
-    boxName: 'TEST AIS-01 First Aid Box',
+    boxName: 'AIS-01 First Aid Box',
     location: 'New AIS Assembly - Production',
     daysOverdue: 3,
   });
   const escalation = buildEscalationEmail({
     boxId: '00000000-0000-4000-8000-000000000001',
-    boxName: 'TEST AIS-01 First Aid Box',
+    boxName: 'AIS-01 First Aid Box',
     location: 'New AIS Assembly - Production',
     daysOverdue: 28,
   });
@@ -118,27 +118,27 @@ function sampleReminderItems(appUrl: string): ReminderSummaryItem[] {
 
   return [
     {
-      title: 'TEST inspection due',
+      title: 'Inspection check',
       boxName: 'AIS-01 - AIS-01 First Aid Box',
       location: 'New AIS Assembly - Production',
       status: 'Due in 3 days',
-      detail: `Sample inspection due date: ${dueSoon}`,
+      detail: `Inspection due date is ${dueSoon}.`,
       link: `${appUrl}/my-boxes`,
     },
     {
-      title: 'TEST item expired - Handyplast',
+      title: 'Handyplast',
       boxName: 'AIS-01 - AIS-01 First Aid Box',
       location: 'New AIS Assembly - Production',
       status: 'Expired',
-      detail: `Sample expiry date: ${expired}`,
+      detail: `Expiry date: ${expired}`,
       link: `${appUrl}/admin?tab=expiring-items`,
     },
     {
-      title: 'TEST item expiring soon - Alcohol swab',
+      title: 'Alcohol swab',
       boxName: 'OFF-01 - OFF-01 First Aid Box',
       location: 'Office 1st Floor, Near Lift - Office',
       status: 'Expires in 7 days',
-      detail: `Sample expiry date: ${expiring}`,
+      detail: `Expiry date: ${expiring}`,
       link: `${appUrl}/admin?tab=expiring-items`,
     },
   ];

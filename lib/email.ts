@@ -200,7 +200,7 @@ function emailShell(ctx: {
             </tr>
             <tr>
               <td style="padding:0 24px 24px">
-                <div style="border:1px solid ${tone.border};background:${tone.bg};border-radius:10px;padding:14px 16px;margin-bottom:18px;color:${tone.fg};font-size:14px;line-height:1.5">
+                <div style="border-left:4px solid ${tone.fg};background:#ffffff;border-radius:8px;padding:9px 12px;margin-bottom:14px;color:#334155;font-size:14px;line-height:1.45">
                   ${ctx.introHtml}
                 </div>
                 ${ctx.bodyHtml}
@@ -243,6 +243,49 @@ function statusTone(status: string): Tone {
   return 'blue';
 }
 
+interface SummaryMetric {
+  label: string;
+  value: string | number;
+  tone: Tone;
+}
+
+function summaryMetricsHtml(metrics: SummaryMetric[]): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;margin:0 0 14px">
+    <tr>
+      ${metrics
+        .map((metric, index) => {
+          const tone = tones[metric.tone];
+          const padding = index === 0 ? '0 4px 0 0' : index === metrics.length - 1 ? '0 0 0 4px' : '0 4px';
+          return `<td width="${Math.floor(100 / metrics.length)}%" style="padding:${padding};vertical-align:top">
+            <div style="border:1px solid ${tone.border};background:${tone.bg};border-radius:10px;padding:10px 12px">
+              <p style="margin:0;color:${tone.fg};font-size:20px;line-height:1;font-weight:800">${escapeHtml(String(metric.value))}</p>
+              <p style="margin:5px 0 0;color:#334155;font-size:11px;font-weight:700;text-transform:uppercase">${escapeHtml(metric.label)}</p>
+            </div>
+          </td>`;
+        })
+        .join('')}
+    </tr>
+  </table>`;
+}
+
+function reminderMetrics(items: ReminderSummaryItem[]): SummaryMetric[] {
+  const urgent = items.filter((item) => statusTone(item.status) === 'red').length;
+  return [
+    { label: 'Need action', value: items.length, tone: 'blue' },
+    { label: 'Urgent', value: urgent, tone: urgent > 0 ? 'red' : 'green' },
+    { label: 'Boxes', value: groupByBox(items).length, tone: 'amber' },
+  ];
+}
+
+function actionMetrics(actions: ActionSummaryItem[]): SummaryMetric[] {
+  const high = actions.filter((action) => action.priority === 'High').length;
+  return [
+    { label: 'Actions', value: actions.length, tone: 'blue' },
+    { label: 'High', value: high, tone: high > 0 ? 'red' : 'green' },
+    { label: 'Boxes', value: groupByBox(actions).length, tone: 'amber' },
+  ];
+}
+
 function groupByBox<T extends { boxName: string; location: string }>(items: T[]): Array<{
   boxName: string;
   location: string;
@@ -256,6 +299,31 @@ function groupByBox<T extends { boxName: string; location: string }>(items: T[])
     groups.set(key, group);
   }
   return [...groups.values()];
+}
+
+function orderedReminderGroups(items: ReminderSummaryItem[]): Array<{ boxName: string; location: string; items: ReminderSummaryItem[] }> {
+  return groupByBox(items)
+    .map((group) => ({ ...group, items: [...group.items].sort((a, b) => reminderRank(a) - reminderRank(b)) }))
+    .sort((a, b) => Math.min(...a.items.map(reminderRank)) - Math.min(...b.items.map(reminderRank)));
+}
+
+function orderedActionGroups(actions: ActionSummaryItem[]): Array<{ boxName: string; location: string; items: ActionSummaryItem[] }> {
+  return groupByBox(actions)
+    .map((group) => ({ ...group, items: [...group.items].sort((a, b) => actionRank(a) - actionRank(b)) }))
+    .sort((a, b) => Math.min(...a.items.map(actionRank)) - Math.min(...b.items.map(actionRank)));
+}
+
+function reminderRank(item: ReminderSummaryItem): number {
+  const tone = statusTone(item.status);
+  if (tone === 'red') return 0;
+  if (tone === 'amber') return 1;
+  return 2;
+}
+
+function actionRank(action: ActionSummaryItem): number {
+  if (action.priority === 'High') return 0;
+  if (action.priority === 'Medium') return 1;
+  return 2;
 }
 
 /** First-aider single inspection reminder email. */
@@ -315,8 +383,8 @@ export function buildEscalationEmail(ctx: ReminderContext): {
 }
 
 function reminderListHtml(items: ReminderSummaryItem[]): string {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 12px">
-    ${groupByBox(items)
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 10px">
+    ${orderedReminderGroups(items)
       .map(
         (group) => `<tr>
           <td style="border:1px solid #dbe5ef;border-radius:12px;background:#ffffff;overflow:hidden">
@@ -325,15 +393,19 @@ function reminderListHtml(items: ReminderSummaryItem[]): string {
               ${group.items
                 .map(
                   (item) => `<tr>
-                    <td style="padding:12px 14px;border-top:1px solid #e2e8f0">
+                    <td style="padding:10px 12px;border-top:1px solid #e2e8f0">
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                         <tr>
-                          <td style="font-size:14px;font-weight:700;color:#0f172a">${escapeHtml(item.title)}</td>
-                          <td align="right">${badgeHtml(item.status, statusTone(item.status))}</td>
+                          <td style="padding-right:10px">
+                            <p style="margin:0;color:#0f172a;font-size:14px;font-weight:800;line-height:1.35">${escapeHtml(cleanTitle(item.title))}</p>
+                            <p style="margin:4px 0 0;color:#64748b;font-size:12px;line-height:1.35">${escapeHtml(compactDetail(item.detail))}</p>
+                          </td>
+                          <td align="right" style="white-space:nowrap;vertical-align:top">
+                            ${badgeHtml(shortStatus(item.status), statusTone(item.status))}
+                            <p style="margin:8px 0 0"><a href="${escapeHtml(item.link)}" style="color:#16a34a;font-size:12px;font-weight:800;text-decoration:none">Open</a></p>
+                          </td>
                         </tr>
                       </table>
-                      <p style="margin:6px 0 8px;color:#334155;font-size:13px">${escapeHtml(item.detail)}</p>
-                      <a href="${escapeHtml(item.link)}" style="color:#16a34a;font-size:13px;font-weight:700;text-decoration:none">Open item</a>
                     </td>
                   </tr>`,
                 )
@@ -347,12 +419,14 @@ function reminderListHtml(items: ReminderSummaryItem[]): string {
 }
 
 function boxGroupHeaderHtml(boxName: string, location: string, count: number): string {
-  return `<div style="padding:13px 14px;background:#f8fafc">
+  const box = splitBoxName(boxName);
+  return `<div style="padding:12px 14px;background:#f8fafc">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
       <tr>
         <td>
-          <p style="margin:0;color:#0f172a;font-size:15px;font-weight:800">${escapeHtml(boxName)}</p>
-          <p style="margin:3px 0 0;color:#64748b;font-size:12px">${escapeHtml(location || 'Location not set')}</p>
+          <p style="margin:0;color:#0f172a;font-size:16px;font-weight:900;line-height:1.2">${escapeHtml(box.code)}</p>
+          <p style="margin:4px 0 0;color:#475569;font-size:12px;line-height:1.35">${escapeHtml(box.name || location || 'Location not set')}</p>
+          ${box.name && location ? `<p style="margin:2px 0 0;color:#64748b;font-size:11px;line-height:1.35">${escapeHtml(location)}</p>` : ''}
         </td>
         <td align="right">${badgeHtml(`${count} item${count === 1 ? '' : 's'}`, 'blue')}</td>
       </tr>
@@ -361,7 +435,8 @@ function boxGroupHeaderHtml(boxName: string, location: string, count: number): s
 }
 
 function reminderListText(items: ReminderSummaryItem[]): string {
-  return groupByBox(items)
+  const urgent = items.filter((item) => statusTone(item.status) === 'red').length;
+  return orderedReminderGroups(items)
     .map(
       (group) =>
         `${group.boxName}\n` +
@@ -376,12 +451,39 @@ function reminderListText(items: ReminderSummaryItem[]): string {
           )
           .join('\n'),
     )
-    .join('\n\n');
+    .join('\n\n') +
+    `\n\nSummary: ${items.length} need action, ${urgent} urgent, ${groupByBox(items).length} boxes.`;
+}
+
+function splitBoxName(boxName: string): { code: string; name: string } {
+  const parts = boxName.split(' - ');
+  if (parts.length < 2) return { code: boxName, name: '' };
+  return { code: parts[0] ?? boxName, name: parts.slice(1).join(' - ') };
+}
+
+function cleanTitle(title: string): string {
+  return title.replace(/^TEST\s+/i, '').replace(/^Item\s+/i, '');
+}
+
+function compactDetail(detail: string): string {
+  return detail
+    .replace(/^Sample\s+/i, '')
+    .replace(/^Inspection due date is\s+/i, 'Due: ')
+    .replace(/^Inspection is overdue by\s+/i, 'Overdue: ')
+    .replace(/^Expiry date:/i, 'Expiry:')
+    .replace(/\.$/, '')
+    .trim();
+}
+
+function shortStatus(status: string): string {
+  return status
+    .replace(/^Expires in\s+(\d+)\s+days?$/i, 'Expiring $1d')
+    .replace(/^Due in\s+(\d+)\s+days?$/i, 'Due $1d');
 }
 
 function actionListHtml(actions: ActionSummaryItem[]): string {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 12px">
-    ${groupByBox(actions)
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 10px">
+    ${orderedActionGroups(actions)
       .map(
         (group) => `<tr>
           <td style="border:1px solid #dbe5ef;border-radius:12px;background:#ffffff;overflow:hidden">
@@ -389,17 +491,21 @@ function actionListHtml(actions: ActionSummaryItem[]): string {
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
               ${group.items
                 .map((action) => {
-                  const title = `${action.actionType}${action.itemName ? ` - ${action.itemName}` : ''}`;
+                  const title = action.itemName ?? action.actionType;
                   return `<tr>
-                    <td style="padding:12px 14px;border-top:1px solid #e2e8f0">
+                    <td style="padding:10px 12px;border-top:1px solid #e2e8f0">
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                         <tr>
-                          <td style="font-size:14px;font-weight:700;color:#0f172a">${escapeHtml(title)}</td>
-                          <td align="right">${badgeHtml(action.priority ?? 'Priority not set', action.priority === 'High' ? 'red' : 'amber')}</td>
+                          <td style="padding-right:10px">
+                            <p style="margin:0;color:#0f172a;font-size:14px;font-weight:800;line-height:1.35">${escapeHtml(title)}</p>
+                            <p style="margin:4px 0 0;color:#64748b;font-size:12px;line-height:1.35">${escapeHtml(action.actionType)} - ${escapeHtml(action.actionCode)}</p>
+                          </td>
+                          <td align="right" style="white-space:nowrap;vertical-align:top">
+                            ${badgeHtml(action.priority ?? 'Priority not set', action.priority === 'High' ? 'red' : 'amber')}
+                            <p style="margin:8px 0 0"><a href="${escapeHtml(action.link)}" style="color:#16a34a;font-size:12px;font-weight:800;text-decoration:none">Open</a></p>
+                          </td>
                         </tr>
                       </table>
-                      <p style="margin:6px 0 8px;color:#334155;font-size:13px">Code: ${escapeHtml(action.actionCode)}</p>
-                      <a href="${escapeHtml(action.link)}" style="color:#16a34a;font-size:13px;font-weight:700;text-decoration:none">Open action</a>
                     </td>
                   </tr>`;
                 })
@@ -413,7 +519,8 @@ function actionListHtml(actions: ActionSummaryItem[]): string {
 }
 
 function actionListText(actions: ActionSummaryItem[]): string {
-  return groupByBox(actions)
+  const high = actions.filter((action) => action.priority === 'High').length;
+  return orderedActionGroups(actions)
     .map(
       (group) =>
         `${group.boxName}\n` +
@@ -428,7 +535,8 @@ function actionListText(actions: ActionSummaryItem[]): string {
           )
           .join('\n'),
     )
-    .join('\n\n');
+    .join('\n\n') +
+    `\n\nSummary: ${actions.length} actions, ${high} high priority, ${groupByBox(actions).length} boxes.`;
 }
 
 export function buildAssignedReminderSummaryEmail(ctx: {
@@ -437,17 +545,18 @@ export function buildAssignedReminderSummaryEmail(ctx: {
 }): { subject: string; html: string; text: string } {
   const subject = `First Aid reminders: ${ctx.items.length} item${ctx.items.length === 1 ? '' : 's'} need attention`;
   const greeting = ctx.recipientName ? `Hi ${ctx.recipientName},` : 'Hi,';
+  const boxCount = groupByBox(ctx.items).length;
   const text =
-    `${greeting}\n\nThe following assigned first aid checks are almost due or already due:\n\n` +
+    `${greeting}\n\n${ctx.items.length} assigned check${ctx.items.length === 1 ? '' : 's'} need attention across ${boxCount} box${boxCount === 1 ? '' : 'es'}.\n\n` +
     `${reminderListText(ctx.items)}\n`;
   const html = emailShell({
-    title: 'Assigned reminders',
+    title: `${ctx.items.length} assigned check${ctx.items.length === 1 ? '' : 's'} need attention`,
     preheader: `${ctx.items.length} assigned first aid check${ctx.items.length === 1 ? '' : 's'} need attention.`,
     tone: 'amber',
-    introHtml: `${escapeHtml(greeting)}<br/>The following assigned first aid checks are almost due or already due.`,
-    bodyHtml: reminderListHtml(ctx.items),
+    introHtml: `${escapeHtml(greeting)} ${ctx.items.length} item${ctx.items.length === 1 ? '' : 's'} need attention across ${boxCount} box${boxCount === 1 ? '' : 'es'}.`,
+    bodyHtml: `${summaryMetricsHtml(reminderMetrics(ctx.items))}${reminderListHtml(ctx.items)}`,
     ctaHref: ctx.items[0]?.link,
-    ctaLabel: 'Open first item',
+    ctaLabel: 'Open first task',
   });
   return { subject, html, text };
 }
@@ -456,15 +565,16 @@ export function buildAdminDueSummaryEmail(ctx: {
   items: ReminderSummaryItem[];
 }): { subject: string; html: string; text: string } {
   const subject = `First Aid due summary: ${ctx.items.length} inspection/item reminder${ctx.items.length === 1 ? '' : 's'}`;
+  const boxCount = groupByBox(ctx.items).length;
   const text =
-    `Admin summary: the following inspections or items are almost due or already due:\n\n` +
+    `Admin summary: ${ctx.items.length} inspection/item reminder${ctx.items.length === 1 ? '' : 's'} need attention across ${boxCount} box${boxCount === 1 ? '' : 'es'}.\n\n` +
     `${reminderListText(ctx.items)}\n`;
   const html = emailShell({
-    title: 'Admin due summary',
+    title: `${ctx.items.length} due reminder${ctx.items.length === 1 ? '' : 's'} across ${boxCount} box${boxCount === 1 ? '' : 'es'}`,
     preheader: `${ctx.items.length} inspection or item reminder${ctx.items.length === 1 ? '' : 's'} need attention.`,
     tone: 'amber',
-    introHtml: `The following inspections or items are almost due or already due across all active boxes.`,
-    bodyHtml: reminderListHtml(ctx.items),
+    introHtml: `Review the boxes below. Urgent items are highlighted first by status.`,
+    bodyHtml: `${summaryMetricsHtml(reminderMetrics(ctx.items))}${reminderListHtml(ctx.items)}`,
     ctaHref: `${PUBLIC_ENV.appUrl()}/reports`,
     ctaLabel: 'Open dashboard',
   });
@@ -475,16 +585,17 @@ export function buildAdminActionSummaryEmail(ctx: {
   actions: ActionSummaryItem[];
 }): { subject: string; html: string; text: string } {
   const subject = `First Aid action summary: ${ctx.actions.length} required action${ctx.actions.length === 1 ? '' : 's'}`;
+  const boxCount = groupByBox(ctx.actions).length;
   const text =
-    `Admin summary: the following required action items are open or in progress:\n\n` +
+    `Admin summary: ${ctx.actions.length} required action${ctx.actions.length === 1 ? '' : 's'} are open or in progress across ${boxCount} box${boxCount === 1 ? '' : 'es'}.\n\n` +
     actionListText(ctx.actions) +
     '\n';
   const html = emailShell({
-    title: 'Required action summary',
+    title: `${ctx.actions.length} required action${ctx.actions.length === 1 ? '' : 's'} across ${boxCount} box${boxCount === 1 ? '' : 'es'}`,
     preheader: `${ctx.actions.length} required action${ctx.actions.length === 1 ? '' : 's'} are open or in progress.`,
     tone: 'red',
-    introHtml: `The following required action items are open or in progress. They are consolidated into this single admin email.`,
-    bodyHtml: actionListHtml(ctx.actions),
+    introHtml: `One consolidated action email. High priority items are highlighted.`,
+    bodyHtml: `${summaryMetricsHtml(actionMetrics(ctx.actions))}${actionListHtml(ctx.actions)}`,
     ctaHref: `${PUBLIC_ENV.appUrl()}/actions`,
     ctaLabel: 'Open actions',
   });
