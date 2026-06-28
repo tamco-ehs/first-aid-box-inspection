@@ -9,14 +9,16 @@ import { BoxesAdmin } from '@/components/admin/BoxesAdmin';
 import { AssignmentsAdmin } from '@/components/admin/AssignmentsAdmin';
 import { TemplateAdmin } from '@/components/admin/TemplateAdmin';
 import { BoxItemsAdmin } from '@/components/admin/BoxItemsAdmin';
+import { BoxExpiryAdmin } from '@/components/admin/BoxExpiryAdmin';
 import { ExpiringItemsAdmin } from '@/components/admin/ExpiringItemsAdmin';
 import { UsersAdmin } from '@/components/admin/UsersAdmin';
 import { EshNav } from '@/components/esh/EshNav';
 
-type Tab = 'boxes' | 'assignments' | 'template' | 'box-items' | 'expiring-items' | 'users';
+type Tab = 'boxes' | 'box-expiry' | 'assignments' | 'template' | 'box-items' | 'expiring-items' | 'users';
 
 const TABS: [Tab, string][] = [
-  ['boxes', 'Boxes'],
+  ['boxes', 'Box masterlist'],
+  ['box-expiry', 'Box expiry'],
   ['assignments', 'Assignments'],
   ['template', 'Checklist'],
   ['box-items', 'Box items'],
@@ -58,6 +60,7 @@ function Admin({ me }: { me: Me }) {
         </div>
 
         {tab === 'boxes' && <BoxesAdmin />}
+        {tab === 'box-expiry' && <BoxExpiryAdmin />}
         {tab === 'assignments' && <AssignmentsAdmin />}
         {tab === 'template' && <TemplateAdmin />}
         {tab === 'box-items' && <BoxItemsAdmin />}
