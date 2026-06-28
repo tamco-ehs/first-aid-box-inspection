@@ -243,6 +243,21 @@ function statusTone(status: string): Tone {
   return 'blue';
 }
 
+function groupByBox<T extends { boxName: string; location: string }>(items: T[]): Array<{
+  boxName: string;
+  location: string;
+  items: T[];
+}> {
+  const groups = new Map<string, { boxName: string; location: string; items: T[] }>();
+  for (const item of items) {
+    const key = `${item.boxName}||${item.location}`;
+    const group = groups.get(key) ?? { boxName: item.boxName, location: item.location, items: [] };
+    group.items.push(item);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 /** First-aider single inspection reminder email. */
 export function buildReminderEmail(ctx: ReminderContext): {
   subject: string;
@@ -299,22 +314,31 @@ export function buildEscalationEmail(ctx: ReminderContext): {
   return { subject, html, text };
 }
 
-function listHtml(items: ReminderSummaryItem[]): string {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 10px">
-    ${items
+function reminderListHtml(items: ReminderSummaryItem[]): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 12px">
+    ${groupByBox(items)
       .map(
-        (item) => `<tr>
-          <td style="border:1px solid #e2e8f0;border-radius:10px;padding:14px;background:#ffffff">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="font-size:15px;font-weight:700;color:#0f172a">${escapeHtml(item.title)}</td>
-                <td align="right">${badgeHtml(item.status, statusTone(item.status))}</td>
-              </tr>
+        (group) => `<tr>
+          <td style="border:1px solid #dbe5ef;border-radius:12px;background:#ffffff;overflow:hidden">
+            ${boxGroupHeaderHtml(group.boxName, group.location, group.items.length)}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+              ${group.items
+                .map(
+                  (item) => `<tr>
+                    <td style="padding:12px 14px;border-top:1px solid #e2e8f0">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                        <tr>
+                          <td style="font-size:14px;font-weight:700;color:#0f172a">${escapeHtml(item.title)}</td>
+                          <td align="right">${badgeHtml(item.status, statusTone(item.status))}</td>
+                        </tr>
+                      </table>
+                      <p style="margin:6px 0 8px;color:#334155;font-size:13px">${escapeHtml(item.detail)}</p>
+                      <a href="${escapeHtml(item.link)}" style="color:#16a34a;font-size:13px;font-weight:700;text-decoration:none">Open item</a>
+                    </td>
+                  </tr>`,
+                )
+                .join('')}
             </table>
-            <p style="margin:6px 0 0;color:#334155;font-size:13px">${escapeHtml(item.boxName)}</p>
-            <p style="margin:2px 0 8px;color:#64748b;font-size:12px">${escapeHtml(item.location)}</p>
-            <p style="margin:0 0 8px;color:#334155;font-size:13px">${escapeHtml(item.detail)}</p>
-            <a href="${escapeHtml(item.link)}" style="color:#16a34a;font-size:13px;font-weight:700;text-decoration:none">Open item</a>
           </td>
         </tr>`,
       )
@@ -322,42 +346,89 @@ function listHtml(items: ReminderSummaryItem[]): string {
   </table>`;
 }
 
-function listText(items: ReminderSummaryItem[]): string {
-  return items
+function boxGroupHeaderHtml(boxName: string, location: string, count: number): string {
+  return `<div style="padding:13px 14px;background:#f8fafc">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td>
+          <p style="margin:0;color:#0f172a;font-size:15px;font-weight:800">${escapeHtml(boxName)}</p>
+          <p style="margin:3px 0 0;color:#64748b;font-size:12px">${escapeHtml(location || 'Location not set')}</p>
+        </td>
+        <td align="right">${badgeHtml(`${count} item${count === 1 ? '' : 's'}`, 'blue')}</td>
+      </tr>
+    </table>
+  </div>`;
+}
+
+function reminderListText(items: ReminderSummaryItem[]): string {
+  return groupByBox(items)
     .map(
-      (item, index) =>
-        `${index + 1}. ${item.title}\n` +
-        `   Box: ${item.boxName}\n` +
-        `   Location: ${item.location}\n` +
-        `   Status: ${item.status}\n` +
-        `   ${item.detail}\n` +
-        `   Link: ${item.link}`,
+      (group) =>
+        `${group.boxName}\n` +
+        `Location: ${group.location}\n` +
+        group.items
+          .map(
+            (item, index) =>
+              `  ${index + 1}. ${item.title}\n` +
+              `     Status: ${item.status}\n` +
+              `     ${item.detail}\n` +
+              `     Link: ${item.link}`,
+          )
+          .join('\n'),
     )
     .join('\n\n');
 }
 
 function actionListHtml(actions: ActionSummaryItem[]): string {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 10px">
-    ${actions
-      .map((action) => {
-        const title = `${action.actionType}${action.itemName ? ` - ${action.itemName}` : ''}`;
-        return `<tr>
-          <td style="border:1px solid #e2e8f0;border-radius:10px;padding:14px;background:#ffffff">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="font-size:15px;font-weight:700;color:#0f172a">${escapeHtml(title)}</td>
-                <td align="right">${badgeHtml(action.priority ?? 'Priority not set', action.priority === 'High' ? 'red' : 'amber')}</td>
-              </tr>
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0 12px">
+    ${groupByBox(actions)
+      .map(
+        (group) => `<tr>
+          <td style="border:1px solid #dbe5ef;border-radius:12px;background:#ffffff;overflow:hidden">
+            ${boxGroupHeaderHtml(group.boxName, group.location, group.items.length)}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+              ${group.items
+                .map((action) => {
+                  const title = `${action.actionType}${action.itemName ? ` - ${action.itemName}` : ''}`;
+                  return `<tr>
+                    <td style="padding:12px 14px;border-top:1px solid #e2e8f0">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                        <tr>
+                          <td style="font-size:14px;font-weight:700;color:#0f172a">${escapeHtml(title)}</td>
+                          <td align="right">${badgeHtml(action.priority ?? 'Priority not set', action.priority === 'High' ? 'red' : 'amber')}</td>
+                        </tr>
+                      </table>
+                      <p style="margin:6px 0 8px;color:#334155;font-size:13px">Code: ${escapeHtml(action.actionCode)}</p>
+                      <a href="${escapeHtml(action.link)}" style="color:#16a34a;font-size:13px;font-weight:700;text-decoration:none">Open action</a>
+                    </td>
+                  </tr>`;
+                })
+                .join('')}
             </table>
-            <p style="margin:6px 0 0;color:#334155;font-size:13px">Code: ${escapeHtml(action.actionCode)}</p>
-            <p style="margin:2px 0 0;color:#334155;font-size:13px">${escapeHtml(action.boxName)}</p>
-            <p style="margin:2px 0 8px;color:#64748b;font-size:12px">${escapeHtml(action.location)}</p>
-            <a href="${escapeHtml(action.link)}" style="color:#16a34a;font-size:13px;font-weight:700;text-decoration:none">Open action</a>
           </td>
-        </tr>`;
-      })
+        </tr>`,
+      )
       .join('')}
   </table>`;
+}
+
+function actionListText(actions: ActionSummaryItem[]): string {
+  return groupByBox(actions)
+    .map(
+      (group) =>
+        `${group.boxName}\n` +
+        `Location: ${group.location}\n` +
+        group.items
+          .map(
+            (action, index) =>
+              `  ${index + 1}. ${action.actionType}${action.itemName ? ` - ${action.itemName}` : ''}\n` +
+              `     Code: ${action.actionCode}\n` +
+              `     Priority: ${action.priority ?? 'Not set'}\n` +
+              `     Link: ${action.link}`,
+          )
+          .join('\n'),
+    )
+    .join('\n\n');
 }
 
 export function buildAssignedReminderSummaryEmail(ctx: {
@@ -368,13 +439,13 @@ export function buildAssignedReminderSummaryEmail(ctx: {
   const greeting = ctx.recipientName ? `Hi ${ctx.recipientName},` : 'Hi,';
   const text =
     `${greeting}\n\nThe following assigned first aid checks are almost due or already due:\n\n` +
-    `${listText(ctx.items)}\n`;
+    `${reminderListText(ctx.items)}\n`;
   const html = emailShell({
     title: 'Assigned reminders',
     preheader: `${ctx.items.length} assigned first aid check${ctx.items.length === 1 ? '' : 's'} need attention.`,
     tone: 'amber',
     introHtml: `${escapeHtml(greeting)}<br/>The following assigned first aid checks are almost due or already due.`,
-    bodyHtml: listHtml(ctx.items),
+    bodyHtml: reminderListHtml(ctx.items),
     ctaHref: ctx.items[0]?.link,
     ctaLabel: 'Open first item',
   });
@@ -387,13 +458,13 @@ export function buildAdminDueSummaryEmail(ctx: {
   const subject = `First Aid due summary: ${ctx.items.length} inspection/item reminder${ctx.items.length === 1 ? '' : 's'}`;
   const text =
     `Admin summary: the following inspections or items are almost due or already due:\n\n` +
-    `${listText(ctx.items)}\n`;
+    `${reminderListText(ctx.items)}\n`;
   const html = emailShell({
     title: 'Admin due summary',
     preheader: `${ctx.items.length} inspection or item reminder${ctx.items.length === 1 ? '' : 's'} need attention.`,
     tone: 'amber',
     introHtml: `The following inspections or items are almost due or already due across all active boxes.`,
-    bodyHtml: listHtml(ctx.items),
+    bodyHtml: reminderListHtml(ctx.items),
     ctaHref: `${PUBLIC_ENV.appUrl()}/reports`,
     ctaLabel: 'Open dashboard',
   });
@@ -406,17 +477,7 @@ export function buildAdminActionSummaryEmail(ctx: {
   const subject = `First Aid action summary: ${ctx.actions.length} required action${ctx.actions.length === 1 ? '' : 's'}`;
   const text =
     `Admin summary: the following required action items are open or in progress:\n\n` +
-    ctx.actions
-      .map(
-        (action, index) =>
-          `${index + 1}. ${action.actionType}${action.itemName ? ` - ${action.itemName}` : ''}\n` +
-          `   Code: ${action.actionCode}\n` +
-          `   Box: ${action.boxName}\n` +
-          `   Location: ${action.location}\n` +
-          `   Priority: ${action.priority ?? 'Not set'}\n` +
-          `   Link: ${action.link}`,
-      )
-      .join('\n\n') +
+    actionListText(ctx.actions) +
     '\n';
   const html = emailShell({
     title: 'Required action summary',
