@@ -6,7 +6,7 @@
 import { getAssignedBoxIds, requireActive } from '@/lib/auth';
 import { jsonOk, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { compareByDue, computeDue } from '@/lib/logic/due.ts';
+import { compareByDue, computeBoxDue } from '@/lib/logic/due.ts';
 import { primaryAction, statusTag } from '@/lib/logic/actions.ts';
 
 export const runtime = 'nodejs';
@@ -19,6 +19,7 @@ interface BoxRow {
   location_description: string;
   area: string | null;
   inspection_frequency_days: number;
+  box_expiry_start_date: string | null;
   created_at: string;
 }
 
@@ -28,26 +29,41 @@ interface AssignmentRow {
   profiles: { full_name: string; email: string | null } | null;
 }
 
+function isMissingExpiryStartDateColumn(message: string): boolean {
+  return message.includes('box_expiry_start_date');
+}
+
 export async function GET(): Promise<Response> {
   return safe(async () => {
     const ctx = await requireActive();
     const admin = createAdminClient();
     const now = new Date();
 
-    let query = admin
-      .from('boxes')
-      .select('id, box_code, box_name, location_description, area, inspection_frequency_days, created_at')
-      .eq('is_active', true);
-
+    const assignedIds = ctx.profile.role === 'user' ? await getAssignedBoxIds(ctx.userId) : [];
     if (ctx.profile.role === 'user') {
-      const assignedIds = await getAssignedBoxIds(ctx.userId);
       if (assignedIds.length === 0) {
         return jsonOk({ role: ctx.profile.role, count: 0, boxes: [] });
       }
-      query = query.in('id', assignedIds);
     }
 
-    const { data: boxesData, error } = await query;
+    const selectWithStartDate =
+      'id, box_code, box_name, location_description, area, inspection_frequency_days, box_expiry_start_date, created_at';
+    const selectFallback = 'id, box_code, box_name, location_description, area, inspection_frequency_days, created_at';
+    const runBoxesQuery = (select: string) => {
+      let query = admin.from('boxes').select(select).eq('is_active', true);
+      if (ctx.profile.role === 'user') query = query.in('id', assignedIds);
+      return query;
+    };
+
+    const primary = await runBoxesQuery(selectWithStartDate);
+    let boxesData = primary.data as BoxRow[] | null;
+    let error = primary.error;
+    if (error && isMissingExpiryStartDateColumn(error.message)) {
+      const fallback = await runBoxesQuery(selectFallback);
+      const fallbackRows = (fallback.data ?? []) as unknown as Omit<BoxRow, 'box_expiry_start_date'>[];
+      boxesData = fallbackRows.map((box) => ({ ...box, box_expiry_start_date: null }));
+      error = fallback.error;
+    }
     if (error) {
       console.error('[my-boxes] boxes query failed:', error.message);
       throw new Error('boxes query failed');
@@ -106,9 +122,10 @@ export async function GET(): Promise<Response> {
 
     const result = boxes.map((b) => {
       const lastInspectionAt = lastInspectionByBox.get(b.id) ?? null;
-      const due = computeDue({
+      const due = computeBoxDue({
         lastInspectionAt,
         boxCreatedAt: b.created_at,
+        boxExpiryStartDate: b.box_expiry_start_date,
         frequencyDays: b.inspection_frequency_days,
         now,
       });

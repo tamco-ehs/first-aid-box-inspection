@@ -123,6 +123,12 @@ provider message id, status, error). The cron consults the latest row per
 (box, type) before sending - this is the duplicate-reminder guard. Written by
 service role only; read by admin only.
 
+### Box Expiry Counting
+`boxes.box_expiry_start_date` is an optional admin-managed baseline date for box
+inspection expiry. When set, the due/reminder logic counts from the later of the
+latest inspection date and this manual start date. When blank, the original box
+creation date remains the fallback baseline.
+
 ## Conventions
 
 - UUID primary keys via `gen_random_uuid()` (built into Postgres 13+).

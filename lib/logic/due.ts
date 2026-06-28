@@ -21,6 +21,20 @@ export interface DueResult {
   due_status: DueStatus;
 }
 
+export interface BoxDueInput {
+  lastInspectionAt: string | null;
+  boxCreatedAt: string;
+  boxExpiryStartDate?: string | null;
+  frequencyDays: number;
+  now: Date;
+  dueSoonWindowDays?: number;
+}
+
+export interface BoxDueResult extends DueResult {
+  reference_date: string;
+  reference_source: 'last_inspection' | 'manual_start' | 'box_created';
+}
+
 function addDays(iso: string, days: number): number {
   return new Date(iso).getTime() + days * 86_400_000;
 }
@@ -54,6 +68,30 @@ export function computeDue(input: DueInput): DueResult {
     next_due_date: new Date(dueMs).toISOString(),
     days_overdue: daysOverdue,
     due_status,
+  };
+}
+
+export function computeBoxDue(input: BoxDueInput): BoxDueResult {
+  const baseline = input.boxExpiryStartDate ?? input.boxCreatedAt;
+  const baselineSource = input.boxExpiryStartDate ? 'manual_start' : 'box_created';
+  const baselineTime = new Date(baseline).getTime();
+  const inspectionTime = input.lastInspectionAt ? new Date(input.lastInspectionAt).getTime() : Number.NEGATIVE_INFINITY;
+  const referenceIsInspection = inspectionTime >= baselineTime;
+  const referenceDate = referenceIsInspection ? (input.lastInspectionAt as string) : baseline;
+  const referenceSource = referenceIsInspection ? 'last_inspection' : baselineSource;
+
+  const due = computeDue({
+    lastInspectionAt: referenceSource === 'box_created' ? null : referenceDate,
+    boxCreatedAt: referenceDate,
+    frequencyDays: input.frequencyDays,
+    now: input.now,
+    dueSoonWindowDays: input.dueSoonWindowDays,
+  });
+
+  return {
+    ...due,
+    reference_date: referenceDate,
+    reference_source: referenceSource,
   };
 }
 

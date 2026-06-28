@@ -13,7 +13,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { ApiError, jsonOk, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { PUBLIC_ENV, SERVER_ENV } from '@/lib/env';
-import { computeDue } from '@/lib/logic/due.ts';
+import { computeBoxDue } from '@/lib/logic/due.ts';
 import {
   buildAdminActionSummaryEmail,
   buildAdminDueSummaryEmail,
@@ -50,6 +50,7 @@ interface BoxRow {
   area: string | null;
   created_at: string;
   inspection_frequency_days: number;
+  box_expiry_start_date: string | null;
 }
 
 interface ReminderEntry extends ReminderSummaryItem {
@@ -124,6 +125,32 @@ async function getSentSet(admin: Admin, cycleKey: string): Promise<Set<string>> 
 
 function sentKey(reminderType: string, reminderKey: string, email: string): string {
   return `${reminderType}|${reminderKey}|${email.toLowerCase()}`;
+}
+
+function isMissingExpiryStartDateColumn(message: string): boolean {
+  return message.includes('box_expiry_start_date');
+}
+
+async function getActiveBoxes(admin: Admin): Promise<BoxRow[]> {
+  const selectWithStartDate =
+    'id, box_code, box_name, location_description, area, created_at, inspection_frequency_days, box_expiry_start_date';
+  const selectFallback = 'id, box_code, box_name, location_description, area, created_at, inspection_frequency_days';
+  const { data, error } = await admin.from('boxes').select(selectWithStartDate).eq('is_active', true);
+  if (!error) return (data ?? []) as BoxRow[];
+  if (!isMissingExpiryStartDateColumn(error.message)) {
+    console.error('[cron] boxes query failed:', error.message);
+    return [];
+  }
+
+  const fallback = await admin.from('boxes').select(selectFallback).eq('is_active', true);
+  if (fallback.error) {
+    console.error('[cron] boxes fallback query failed:', fallback.error.message);
+    return [];
+  }
+  return ((fallback.data ?? []) as Omit<BoxRow, 'box_expiry_start_date'>[]).map((box) => ({
+    ...box,
+    box_expiry_start_date: null,
+  }));
 }
 
 async function logReminder(
@@ -224,9 +251,10 @@ async function buildInspectionEntries(admin: Admin, boxes: BoxRow[], now: Date):
 
   const entries: ReminderEntry[] = [];
   for (const box of boxes) {
-    const due = computeDue({
+    const due = computeBoxDue({
       lastInspectionAt: latestByBox.get(box.id) ?? null,
       boxCreatedAt: box.created_at,
+      boxExpiryStartDate: box.box_expiry_start_date,
       frequencyDays: box.inspection_frequency_days,
       now,
     });
@@ -441,11 +469,7 @@ export async function GET(req: Request): Promise<Response> {
     const { error: keepAliveErr } = await admin.from('boxes').select('id').limit(1);
     await ensureExpiredItemActions(admin);
 
-    const { data: boxesData } = await admin
-      .from('boxes')
-      .select('id, box_code, box_name, location_description, area, created_at, inspection_frequency_days')
-      .eq('is_active', true);
-    const boxes = (boxesData ?? []) as BoxRow[];
+    const boxes = await getActiveBoxes(admin);
     const boxesById = new Map(boxes.map((box) => [box.id, box]));
 
     const [assignments, adminRecipients, inspectionEntries, itemEntries, actionEntries] = await Promise.all([

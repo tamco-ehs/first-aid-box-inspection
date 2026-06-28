@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compareByDue, computeDue } from './due.ts';
+import { compareByDue, computeBoxDue, computeDue } from './due.ts';
 
 const NOW = new Date('2026-06-10T00:00:00Z');
 
@@ -35,6 +35,32 @@ test('inspected but past frequency -> Overdue with day count', () => {
   const r = computeDue({ lastInspectionAt: daysAgo(40), boxCreatedAt: daysAgo(200), frequencyDays: 30, now: NOW });
   assert.equal(r.due_status, 'Overdue');
   assert.equal(r.days_overdue, 10);
+});
+
+test('manual box expiry start date can reset the due counter', () => {
+  const r = computeBoxDue({
+    lastInspectionAt: daysAgo(80),
+    boxCreatedAt: daysAgo(120),
+    boxExpiryStartDate: daysAgo(10),
+    frequencyDays: 30,
+    now: NOW,
+  });
+  assert.equal(r.reference_source, 'manual_start');
+  assert.equal(r.due_status, 'Completed');
+  assert.equal(r.days_overdue, 0);
+});
+
+test('latest inspection wins after the manual box expiry start date', () => {
+  const r = computeBoxDue({
+    lastInspectionAt: daysAgo(5),
+    boxCreatedAt: daysAgo(120),
+    boxExpiryStartDate: daysAgo(40),
+    frequencyDays: 30,
+    now: NOW,
+  });
+  assert.equal(r.reference_source, 'last_inspection');
+  assert.equal(r.due_status, 'Completed');
+  assert.equal(r.days_overdue, 0);
 });
 
 test('compareByDue: overdue first (most overdue first), then due soon, not yet, completed', () => {

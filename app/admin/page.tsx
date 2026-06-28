@@ -15,16 +15,34 @@ import { UsersAdmin } from '@/components/admin/UsersAdmin';
 import { EshNav } from '@/components/esh/EshNav';
 
 type Tab = 'boxes' | 'box-expiry' | 'assignments' | 'template' | 'box-items' | 'expiring-items' | 'users';
+type Group = 'boxes' | 'items' | 'people';
 
-const TABS: [Tab, string][] = [
-  ['boxes', 'Box masterlist'],
-  ['box-expiry', 'Box expiry'],
-  ['assignments', 'Assignments'],
-  ['template', 'Checklist'],
-  ['box-items', 'Box items'],
-  ['expiring-items', 'Expiring items'],
-  ['users', 'Users'],
+const GROUPS: Array<{ key: Group; label: string; tabs: [Tab, string][] }> = [
+  {
+    key: 'boxes',
+    label: 'Boxes',
+    tabs: [
+      ['boxes', 'Box masterlist'],
+      ['box-expiry', 'Box expiry'],
+      ['assignments', 'Assignments'],
+    ],
+  },
+  {
+    key: 'items',
+    label: 'Items',
+    tabs: [
+      ['template', 'Checklist'],
+      ['box-items', 'Box items'],
+      ['expiring-items', 'Expiring items'],
+    ],
+  },
+  {
+    key: 'people',
+    label: 'People',
+    tabs: [['users', 'Users']],
+  },
 ];
+const TABS = GROUPS.flatMap((group) => group.tabs);
 
 export default function AdminPage() {
   return <RequireAuth roles={['superadmin', 'admin']}>{(me) => <Admin me={me} />}</RequireAuth>;
@@ -33,10 +51,12 @@ export default function AdminPage() {
 function Admin({ me }: { me: Me }) {
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const visibleTabs = me.role === 'superadmin' ? TABS : TABS.filter(([key]) => key !== 'users');
+  const visibleGroups = me.role === 'superadmin' ? GROUPS : GROUPS.filter((group) => group.key !== 'people');
+  const visibleTabs = visibleGroups.flatMap((group) => group.tabs);
   const [tab, setTab] = useState<Tab>(() =>
     isTab(requestedTab) && (requestedTab !== 'users' || me.role === 'superadmin') ? requestedTab : 'boxes',
   );
+  const activeGroup = visibleGroups.find((group) => group.tabs.some(([key]) => key === tab)) ?? visibleGroups[0] ?? GROUPS[0]!;
 
   useEffect(() => {
     if (!isTab(requestedTab)) return;
@@ -48,16 +68,34 @@ function Admin({ me }: { me: Me }) {
       <AppHeader title="Admin" subtitle={me.full_name} right={<EshNav role={me.role} />} />
       <main className="mx-auto max-w-5xl space-y-4 p-4">
         <div className="flex flex-wrap gap-2">
-          {visibleTabs.map(([key, label]) => (
+          {visibleGroups.map((group) => (
             <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`btn btn-md ${tab === key ? 'btn-primary' : 'btn-secondary'}`}
+              key={group.key}
+              onClick={() => setTab(firstTab(group))}
+              className={`btn btn-md ${activeGroup.key === group.key ? 'btn-primary' : 'btn-secondary'}`}
             >
-              {label}
+              {group.label}
             </button>
           ))}
         </div>
+
+        {activeGroup && (
+          <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2">
+            {activeGroup.tabs
+              .filter(([key]) => visibleTabs.some(([visibleKey]) => visibleKey === key))
+              .map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  className={`rounded-md px-3 py-2 text-sm font-semibold ${
+                    tab === key ? 'bg-emerald-50 text-brand' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+          </div>
+        )}
 
         {tab === 'boxes' && <BoxesAdmin />}
         {tab === 'box-expiry' && <BoxExpiryAdmin />}
@@ -73,4 +111,8 @@ function Admin({ me }: { me: Me }) {
 
 function isTab(value: string | null): value is Tab {
   return TABS.some(([key]) => key === value);
+}
+
+function firstTab(group: { tabs: [Tab, string][] }): Tab {
+  return group.tabs[0]?.[0] ?? 'boxes';
 }

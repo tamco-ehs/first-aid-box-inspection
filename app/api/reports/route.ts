@@ -6,7 +6,7 @@
 import { requireActive, requireRole } from '@/lib/auth';
 import { badRequest, jsonOk, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { computeDue } from '@/lib/logic/due.ts';
+import { computeBoxDue } from '@/lib/logic/due.ts';
 import { reportsQuerySchema, firstZodMessage } from '@/lib/validation';
 import { ensureExpiredItemActions } from '@/lib/server/expired-actions';
 
@@ -23,12 +23,39 @@ interface BoxRow {
   area: string | null;
   created_at: string;
   inspection_frequency_days: number;
+  box_expiry_start_date: string | null;
 }
 
 interface ActionMonthlyRow {
   created_at: string;
   closed_at: string | null;
   status: string;
+}
+
+function isMissingExpiryStartDateColumn(message: string): boolean {
+  return message.includes('box_expiry_start_date');
+}
+
+async function getDashboardBoxes(admin: Admin): Promise<BoxRow[]> {
+  const selectWithStartDate =
+    'id, box_code, box_name, location_description, area, created_at, inspection_frequency_days, box_expiry_start_date';
+  const selectFallback = 'id, box_code, box_name, location_description, area, created_at, inspection_frequency_days';
+  const { data, error } = await admin.from('boxes').select(selectWithStartDate).eq('is_active', true);
+  if (!error) return (data ?? []) as BoxRow[];
+  if (!isMissingExpiryStartDateColumn(error.message)) {
+    console.error('[reports] boxes query failed:', error.message);
+    return [];
+  }
+
+  const fallback = await admin.from('boxes').select(selectFallback).eq('is_active', true);
+  if (fallback.error) {
+    console.error('[reports] boxes fallback query failed:', fallback.error.message);
+    return [];
+  }
+  return ((fallback.data ?? []) as Omit<BoxRow, 'box_expiry_start_date'>[]).map((box) => ({
+    ...box,
+    box_expiry_start_date: null,
+  }));
 }
 
 async function buildDashboard(admin: Admin) {
@@ -39,7 +66,7 @@ async function buildDashboard(admin: Admin) {
   const in30 = new Date(now.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
 
   const [
-    { data: boxesData },
+    boxes,
     { data: inspData },
     actionsRes,
     { data: itemData },
@@ -47,10 +74,7 @@ async function buildDashboard(admin: Admin) {
     { data: monthlyActionData },
   ] =
     await Promise.all([
-      admin
-        .from('boxes')
-        .select('id, box_code, box_name, location_description, area, created_at, inspection_frequency_days')
-        .eq('is_active', true),
+      getDashboardBoxes(admin),
       admin.from('inspections').select('box_id, created_at, seal_intact').order('created_at', { ascending: false }),
       // NOTE: no boxes(...) embed here - we join box info in code below so this
       // does not depend on PostgREST resolving the actions->boxes relationship.
@@ -71,7 +95,6 @@ async function buildDashboard(admin: Admin) {
 
   if (actionsRes.error) console.error('[reports] open actions query failed:', actionsRes.error.message);
 
-  const boxes = (boxesData ?? []) as BoxRow[];
   const inspections = (inspData ?? []) as { box_id: string; created_at: string; seal_intact: boolean | null }[];
   const actions = (actionsRes.data ?? []) as Array<{
     id: string;
@@ -104,9 +127,10 @@ async function buildDashboard(admin: Admin) {
   let seal_broken_used = 0;
   for (const b of boxes) {
     const latest = latestByBox.get(b.id);
-    const due = computeDue({
+    const due = computeBoxDue({
       lastInspectionAt: latest?.created_at ?? null,
       boxCreatedAt: b.created_at,
+      boxExpiryStartDate: b.box_expiry_start_date,
       frequencyDays: b.inspection_frequency_days,
       now,
     });

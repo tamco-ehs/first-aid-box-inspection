@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { Badge } from '@/components/StatusBadge';
-import { computeDue, DUE_SOON_WINDOW_DAYS } from '@/lib/logic/due.ts';
+import { computeBoxDue, DUE_SOON_WINDOW_DAYS } from '@/lib/logic/due.ts';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Notice, Section, useAsync } from './shared.tsx';
 
@@ -15,6 +15,7 @@ interface BoxExpiryRow {
   area: string | null;
   created_at: string;
   inspection_frequency_days: number;
+  box_expiry_start_date: string | null;
   is_active: boolean;
 }
 
@@ -26,6 +27,7 @@ interface InspectionRow {
 interface RowView extends BoxExpiryRow {
   latestInspectionAt: string | null;
   countFrom: string;
+  countFromSource: 'last_inspection' | 'manual_start' | 'box_created';
   nextDueDate: string;
   emailStartDate: string;
   daysRemaining: number;
@@ -35,16 +37,27 @@ interface RowView extends BoxExpiryRow {
 
 const MS_PER_DAY = 86_400_000;
 
+function isMissingExpiryStartDateColumn(message: string): boolean {
+  return message.includes('box_expiry_start_date');
+}
+
 export function BoxExpiryAdmin() {
   const sb = getSupabaseBrowserClient();
   const rows = useAsync<RowView[]>(async () => {
-    const [{ data: boxData, error: boxError }, { data: inspectionData, error: inspectionError }] = await Promise.all([
-      sb
-        .from('boxes')
-        .select('id, box_code, box_name, location_description, area, created_at, inspection_frequency_days, is_active')
-        .order('box_code'),
+    const boxSelectWithStartDate =
+      'id, box_code, box_name, location_description, area, created_at, inspection_frequency_days, box_expiry_start_date, is_active';
+    const boxSelectFallback =
+      'id, box_code, box_name, location_description, area, created_at, inspection_frequency_days, is_active';
+    const [boxResult, { data: inspectionData, error: inspectionError }] = await Promise.all([
+      sb.from('boxes').select(boxSelectWithStartDate).order('box_code'),
       sb.from('inspections').select('box_id, created_at').order('created_at', { ascending: false }),
     ]);
+    let { data: boxData, error: boxError } = boxResult;
+    if (boxError && isMissingExpiryStartDateColumn(boxError.message)) {
+      const fallback = await sb.from('boxes').select(boxSelectFallback).order('box_code');
+      boxData = (fallback.data ?? []).map((box) => ({ ...box, box_expiry_start_date: null }));
+      boxError = fallback.error;
+    }
     if (boxError) throw new Error(boxError.message);
     if (inspectionError) throw new Error(inspectionError.message);
 
@@ -75,10 +88,11 @@ export function BoxExpiryAdmin() {
 
       <Section title="Box expiry">
         <div className="overflow-x-auto">
-          <table className="min-w-[920px] w-full border-separate border-spacing-y-2 text-left text-sm">
+          <table className="min-w-[1060px] w-full border-separate border-spacing-y-2 text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
               <tr>
                 <th className="px-3 py-2">Box</th>
+                <th className="px-3 py-2">Start date</th>
                 <th className="px-3 py-2">Count from</th>
                 <th className="px-3 py-2">Expire date</th>
                 <th className="px-3 py-2">Email starts</th>
@@ -118,15 +132,32 @@ function ExpiryRow({
 }) {
   const sb = getSupabaseBrowserClient();
   const [days, setDays] = useState(row.inspection_frequency_days);
+  const [startDate, setStartDate] = useState(toDateInput(row.box_expiry_start_date));
   const [busy, setBusy] = useState(false);
-  const preview = useMemo(() => toRowView({ ...row, inspection_frequency_days: days }, row.latestInspectionAt, new Date()), [days, row]);
+  const preview = useMemo(
+    () =>
+      toRowView(
+        {
+          ...row,
+          inspection_frequency_days: days,
+          box_expiry_start_date: startDate || null,
+        },
+        row.latestInspectionAt,
+        new Date(),
+      ),
+    [days, row, startDate],
+  );
+  const unchanged = days === row.inspection_frequency_days && (startDate || null) === (row.box_expiry_start_date ?? null);
 
   async function save() {
     setBusy(true);
     try {
       const { error } = await sb
         .from('boxes')
-        .update({ inspection_frequency_days: Math.max(1, Number(days) || row.inspection_frequency_days) })
+        .update({
+          inspection_frequency_days: Math.max(1, Number(days) || row.inspection_frequency_days),
+          box_expiry_start_date: startDate || null,
+        })
         .eq('id', row.id);
       if (error) throw new Error(error.message);
       onSaved();
@@ -144,7 +175,21 @@ function ExpiryRow({
         <p className="text-xs text-slate-600">{row.box_name}</p>
         <p className="text-xs text-slate-500">{[row.location_description, row.area].filter(Boolean).join(' - ')}</p>
       </td>
-      <td className="border-y border-slate-200 bg-white px-3 py-3">{formatDate(preview.countFrom)}</td>
+      <td className="border-y border-slate-200 bg-white px-3 py-3">
+        <input
+          type="date"
+          className="input w-40"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+        />
+        <button type="button" className="mt-1 block text-xs font-semibold text-brand" onClick={() => setStartDate('')}>
+          Use default
+        </button>
+      </td>
+      <td className="border-y border-slate-200 bg-white px-3 py-3">
+        <p>{formatDate(preview.countFrom)}</p>
+        <p className="text-xs text-slate-500">{sourceLabel(preview.countFromSource)}</p>
+      </td>
       <td className="border-y border-slate-200 bg-white px-3 py-3 font-semibold">{formatDate(preview.nextDueDate)}</td>
       <td className="border-y border-slate-200 bg-white px-3 py-3">{formatDate(preview.emailStartDate)}</td>
       <td className="border-y border-slate-200 bg-white px-3 py-3">
@@ -166,7 +211,7 @@ function ExpiryRow({
         </div>
       </td>
       <td className="rounded-r-lg border-y border-r border-slate-200 bg-white px-3 py-3 text-right">
-        <button onClick={save} disabled={busy || days === row.inspection_frequency_days} className="btn btn-md btn-primary">
+        <button onClick={save} disabled={busy || unchanged} className="btn btn-md btn-primary">
           {busy ? <Spinner className="h-4 w-4" /> : 'Save'}
         </button>
       </td>
@@ -175,10 +220,10 @@ function ExpiryRow({
 }
 
 function toRowView(box: BoxExpiryRow, latestInspectionAt: string | null, now: Date): RowView {
-  const countFrom = latestInspectionAt ?? box.created_at;
-  const due = computeDue({
+  const due = computeBoxDue({
     lastInspectionAt: latestInspectionAt,
     boxCreatedAt: box.created_at,
+    boxExpiryStartDate: box.box_expiry_start_date,
     frequencyDays: box.inspection_frequency_days,
     now,
   });
@@ -189,7 +234,8 @@ function toRowView(box: BoxExpiryRow, latestInspectionAt: string | null, now: Da
   return {
     ...box,
     latestInspectionAt,
-    countFrom,
+    countFrom: due.reference_date,
+    countFromSource: due.reference_source,
     nextDueDate: due.next_due_date,
     emailStartDate: emailStart,
     daysRemaining,
@@ -235,4 +281,14 @@ function formatDate(value: string): string {
     month: '2-digit',
     year: 'numeric',
   }).format(new Date(value));
+}
+
+function toDateInput(value: string | null): string {
+  return value ? value.slice(0, 10) : '';
+}
+
+function sourceLabel(source: RowView['countFromSource']): string {
+  if (source === 'last_inspection') return 'Last inspection';
+  if (source === 'manual_start') return 'Manual start';
+  return 'Box created';
 }

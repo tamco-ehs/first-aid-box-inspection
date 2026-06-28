@@ -28,6 +28,7 @@ const steps = [
   ['supabase/schema.sql',           'schema: tables, constraints, triggers'],
   ['supabase/rls_policies.sql',     'RLS policies + privilege hardening'],
   ['supabase/revamp.sql',           'revamp: actions table + quick-check columns'],
+  ['supabase/box_expiry_start_date.sql', 'boxes: expiry start date migration'],
   ['supabase/seed.sql',             'seed: baseline template, 22 items, 2 boxes'],
   ['supabase/superadmin_roles.sql',  'roles: superadmin/admin/user migration'],
   ['supabase/email_reminder_cycles.sql', 'reminders: cycle dedup migration'],

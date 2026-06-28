@@ -137,6 +137,7 @@ create table public.boxes (
                              references public.first_aid_kit_templates (id),
   inspection_frequency_days  integer not null default 30
                              check (inspection_frequency_days between 1 and 365),
+  box_expiry_start_date      date,
   qr_code_url                text
                              check (qr_code_url is null
                                     or (qr_code_url like 'https://%' and char_length(qr_code_url) <= 500)),
