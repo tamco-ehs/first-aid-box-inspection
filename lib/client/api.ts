@@ -114,6 +114,20 @@ export interface AdminUserUpdateBody {
   is_active?: boolean;
 }
 
+export interface EmailTestResponse {
+  ok: boolean;
+  recipient: string;
+  count: number;
+  sent: number;
+  results: Array<{
+    key: string;
+    label: string;
+    ok: boolean;
+    id: string | null;
+    error?: string;
+  }>;
+}
+
 export const api = {
   me: () => request<Me>('/api/me'),
   myBoxes: () => request<MyBoxesResponse>('/api/my-boxes'),
@@ -131,6 +145,7 @@ export const api = {
     request<{ ok: boolean }>('/api/admin/users', { method: 'PATCH', body: JSON.stringify(body) }),
   deleteAdminUser: (id: string) =>
     request<{ ok: boolean }>('/api/admin/users', { method: 'DELETE', body: JSON.stringify({ id }) }),
+  testEmails: () => request<EmailTestResponse>('/api/admin/test-emails', { method: 'POST' }),
   actions: (query: string) => request<ActionsResponse>(`/api/actions${query ? `?${query}` : ''}`),
   closeAction: (body: ActionCloseBody) =>
     request<{ ok: boolean; box_ready: boolean; updated_items: number }>('/api/actions/close', {

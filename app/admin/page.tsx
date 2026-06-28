@@ -12,9 +12,10 @@ import { BoxItemsAdmin } from '@/components/admin/BoxItemsAdmin';
 import { BoxExpiryAdmin } from '@/components/admin/BoxExpiryAdmin';
 import { ExpiringItemsAdmin } from '@/components/admin/ExpiringItemsAdmin';
 import { UsersAdmin } from '@/components/admin/UsersAdmin';
+import { EmailTestAdmin } from '@/components/admin/EmailTestAdmin';
 import { EshNav } from '@/components/esh/EshNav';
 
-type Tab = 'boxes' | 'box-expiry' | 'assignments' | 'template' | 'box-items' | 'expiring-items' | 'users';
+type Tab = 'boxes' | 'box-expiry' | 'assignments' | 'template' | 'box-items' | 'expiring-items' | 'email-test' | 'users';
 type Group = 'boxes' | 'items' | 'people';
 
 const GROUPS: Array<{ key: Group; label: string; tabs: [Tab, string][] }> = [
@@ -39,7 +40,10 @@ const GROUPS: Array<{ key: Group; label: string; tabs: [Tab, string][] }> = [
   {
     key: 'people',
     label: 'People',
-    tabs: [['users', 'Users']],
+    tabs: [
+      ['email-test', 'Email test'],
+      ['users', 'Users'],
+    ],
   },
 ];
 const TABS = GROUPS.flatMap((group) => group.tabs);
@@ -51,16 +55,19 @@ export default function AdminPage() {
 function Admin({ me }: { me: Me }) {
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const visibleGroups = me.role === 'superadmin' ? GROUPS : GROUPS.filter((group) => group.key !== 'people');
+  const visibleGroups = GROUPS.map((group) => ({
+    ...group,
+    tabs: group.tabs.filter(([key]) => canSeeTab(key, me.role)),
+  })).filter((group) => group.tabs.length > 0);
   const visibleTabs = visibleGroups.flatMap((group) => group.tabs);
   const [tab, setTab] = useState<Tab>(() =>
-    isTab(requestedTab) && (requestedTab !== 'users' || me.role === 'superadmin') ? requestedTab : 'boxes',
+    isTab(requestedTab) && canSeeTab(requestedTab, me.role) ? requestedTab : 'boxes',
   );
   const activeGroup = visibleGroups.find((group) => group.tabs.some(([key]) => key === tab)) ?? visibleGroups[0] ?? GROUPS[0]!;
 
   useEffect(() => {
     if (!isTab(requestedTab)) return;
-    setTab(requestedTab !== 'users' || me.role === 'superadmin' ? requestedTab : 'boxes');
+    setTab(canSeeTab(requestedTab, me.role) ? requestedTab : 'boxes');
   }, [me.role, requestedTab]);
 
   return (
@@ -103,6 +110,7 @@ function Admin({ me }: { me: Me }) {
         {tab === 'template' && <TemplateAdmin />}
         {tab === 'box-items' && <BoxItemsAdmin />}
         {tab === 'expiring-items' && <ExpiringItemsAdmin />}
+        {tab === 'email-test' && <EmailTestAdmin />}
         {tab === 'users' && me.role === 'superadmin' && <UsersAdmin />}
       </main>
     </>
@@ -115,4 +123,9 @@ function isTab(value: string | null): value is Tab {
 
 function firstTab(group: { tabs: [Tab, string][] }): Tab {
   return group.tabs[0]?.[0] ?? 'boxes';
+}
+
+function canSeeTab(tab: Tab, role: Me['role']): boolean {
+  if (tab === 'users') return role === 'superadmin';
+  return true;
 }
