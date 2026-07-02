@@ -240,7 +240,13 @@ function BoxRow({
       </div>
 
       <div className="mt-3 rounded-lg bg-slate-50 p-3">
-        <p className="mb-2 text-sm font-semibold text-slate-700">QR codes</p>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <p className="text-sm font-bold text-slate-900">Corporate QR labels</p>
+            <p className="text-xs text-slate-500">Download or print ready-to-stick labels for this box.</p>
+          </div>
+          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-brand">{box.box_code}</span>
+        </div>
         {localWarning && (
           <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
             These QR codes point to a local/preview address, so a phone on another network
@@ -249,8 +255,26 @@ function BoxRow({
           </p>
         )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <QrCode value={inspectUrl} label="Inspection (first aiders)" filename={`${box.box_code}-inspection-qr.png`} />
-          <QrCode value={usageUrl} label="Usage (anyone)" filename={`${box.box_code}-usage-qr.png`} />
+          <QrCode
+            value={inspectUrl}
+            label="Inspection QR"
+            purpose="inspection"
+            boxCode={box.box_code}
+            boxName={box.box_name}
+            location={box.location_description}
+            area={box.area}
+            filename={`${box.box_code}-inspection-label.png`}
+          />
+          <QrCode
+            value={usageUrl}
+            label="Usage QR"
+            purpose="usage"
+            boxCode={box.box_code}
+            boxName={box.box_name}
+            location={box.location_description}
+            area={box.area}
+            filename={`${box.box_code}-usage-label.png`}
+          />
         </div>
         <div className="mt-3 space-y-1 text-xs">
           <UrlRow label="Inspection link" url={inspectUrl} />
