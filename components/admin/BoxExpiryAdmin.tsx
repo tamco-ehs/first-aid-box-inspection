@@ -87,34 +87,18 @@ export function BoxExpiryAdmin() {
       {rows.error && <Notice kind="error">{rows.error}</Notice>}
 
       <Section title="Box expiry">
-        <div className="overflow-x-auto">
-          <table className="min-w-[1060px] w-full border-separate border-spacing-y-2 text-left text-sm">
-            <thead className="text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-3 py-2">Box</th>
-                <th className="px-3 py-2">Start date</th>
-                <th className="px-3 py-2">Count from</th>
-                <th className="px-3 py-2">Expire date</th>
-                <th className="px-3 py-2">Email starts</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Expire after</th>
-                <th className="px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {(rows.data ?? []).map((row) => (
-                <ExpiryRow
-                  key={row.id}
-                  row={row}
-                  onSaved={() => {
-                    setMsg({ kind: 'ok', text: `Saved ${row.box_code}.` });
-                    rows.reload();
-                  }}
-                  onError={(text) => setMsg({ kind: 'error', text })}
-                />
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {(rows.data ?? []).map((row) => (
+            <ExpiryRow
+              key={row.id}
+              row={row}
+              onSaved={(text) => {
+                setMsg({ kind: 'ok', text: text ?? `Saved ${row.box_code}.` });
+                rows.reload();
+              }}
+              onError={(text) => setMsg({ kind: 'error', text })}
+            />
+          ))}
         </div>
       </Section>
     </div>
@@ -127,7 +111,7 @@ function ExpiryRow({
   onError,
 }: {
   row: RowView;
-  onSaved: () => void;
+  onSaved: (text?: string) => void;
   onError: (text: string) => void;
 }) {
   const sb = getSupabaseBrowserClient();
@@ -147,18 +131,27 @@ function ExpiryRow({
       ),
     [days, row, startDate],
   );
-  const unchanged = days === row.inspection_frequency_days && (startDate || null) === (row.box_expiry_start_date ?? null);
 
   async function save() {
     setBusy(true);
+    const nextDays = Math.max(1, Number(days) || row.inspection_frequency_days);
     try {
       const { error } = await sb
         .from('boxes')
         .update({
-          inspection_frequency_days: Math.max(1, Number(days) || row.inspection_frequency_days),
+          inspection_frequency_days: nextDays,
           box_expiry_start_date: startDate || null,
         })
         .eq('id', row.id);
+      if (error && isMissingExpiryStartDateColumn(error.message)) {
+        const fallback = await sb
+          .from('boxes')
+          .update({ inspection_frequency_days: nextDays })
+          .eq('id', row.id);
+        if (fallback.error) throw new Error(fallback.error.message);
+        onSaved(`Saved expire after for ${row.box_code}. Start date needs the Supabase box_expiry_start_date migration.`);
+        return;
+      }
       if (error) throw new Error(error.message);
       onSaved();
     } catch (e) {
@@ -169,53 +162,61 @@ function ExpiryRow({
   }
 
   return (
-    <tr className="align-middle">
-      <td className="rounded-l-lg border-y border-l border-slate-200 bg-white px-3 py-3">
-        <p className="font-bold text-slate-950">{row.box_code}</p>
-        <p className="text-xs text-slate-600">{row.box_name}</p>
-        <p className="text-xs text-slate-500">{[row.location_description, row.area].filter(Boolean).join(' - ')}</p>
-      </td>
-      <td className="border-y border-slate-200 bg-white px-3 py-3">
-        <input
-          type="date"
-          className="input w-40"
-          value={startDate}
-          onChange={(e) => setStartDate(e.target.value)}
-        />
-        <button type="button" className="mt-1 block text-xs font-semibold text-brand" onClick={() => setStartDate('')}>
-          Use default
-        </button>
-      </td>
-      <td className="border-y border-slate-200 bg-white px-3 py-3">
-        <p>{formatDate(preview.countFrom)}</p>
-        <p className="text-xs text-slate-500">{sourceLabel(preview.countFromSource)}</p>
-      </td>
-      <td className="border-y border-slate-200 bg-white px-3 py-3 font-semibold">{formatDate(preview.nextDueDate)}</td>
-      <td className="border-y border-slate-200 bg-white px-3 py-3">{formatDate(preview.emailStartDate)}</td>
-      <td className="border-y border-slate-200 bg-white px-3 py-3">
-        <div className="flex flex-col items-start gap-1">
+    <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-bold text-slate-950">{row.box_code}</p>
+          <p className="text-sm text-slate-700">{row.box_name}</p>
+          <p className="text-xs text-slate-500">{[row.location_description, row.area].filter(Boolean).join(' - ')}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <Badge tone={statusTone(preview.status)}>{preview.status}</Badge>
           <span className="text-xs text-slate-500">{statusDetail(preview)}</span>
+          <button type="button" onClick={save} disabled={busy} className="btn btn-md btn-primary">
+            {busy ? <Spinner className="h-4 w-4" /> : 'Save'}
+          </button>
         </div>
-      </td>
-      <td className="border-y border-slate-200 bg-white px-3 py-3">
-        <div className="flex items-center gap-2">
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <label className="block">
+          <span className="label">Start date</span>
+          <input
+            type="date"
+            className="input"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+          <button type="button" className="mt-1 text-xs font-semibold text-brand" onClick={() => setStartDate('')}>
+            Use default
+          </button>
+        </label>
+        <label className="block">
+          <span className="label">Expire after</span>
           <input
             type="number"
             min={1}
-            className="input w-24"
+            className="input"
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
           />
-          <span className="text-xs text-slate-500">days</span>
-        </div>
-      </td>
-      <td className="rounded-r-lg border-y border-r border-slate-200 bg-white px-3 py-3 text-right">
-        <button onClick={save} disabled={busy || unchanged} className="btn btn-md btn-primary">
-          {busy ? <Spinner className="h-4 w-4" /> : 'Save'}
-        </button>
-      </td>
-    </tr>
+          <span className="mt-1 block text-xs text-slate-500">days</span>
+        </label>
+        <Info label="Count from" value={formatDate(preview.countFrom)} sub={sourceLabel(preview.countFromSource)} />
+        <Info label="Expire date" value={formatDate(preview.nextDueDate)} strong />
+        <Info label="Email starts" value={formatDate(preview.emailStartDate)} />
+      </div>
+    </div>
+  );
+}
+
+function Info({ label, value, sub, strong }: { label: string; value: string; sub?: string; strong?: boolean }) {
+  return (
+    <div>
+      <p className="label">{label}</p>
+      <p className={strong ? 'font-semibold text-slate-950' : 'text-slate-800'}>{value}</p>
+      {sub && <p className="text-xs text-slate-500">{sub}</p>}
+    </div>
   );
 }
 

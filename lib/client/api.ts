@@ -158,8 +158,7 @@ export const api = {
       body: JSON.stringify({ upload_type: uploadType }),
     }),
   setItemPhoto: (body: {
-    template_item_id?: string | null;
-    box_item_id?: string | null;
+    template_item_id: string;
     item_photo_url: string;
     item_photo_cloudinary_public_id?: string | null;
   }) => request<{ ok: boolean }>('/api/admin/item-photo', { method: 'POST', body: JSON.stringify(body) }),

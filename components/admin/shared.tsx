@@ -57,7 +57,7 @@ export interface BoxItemRow {
   measurement_type: string;
   has_expiry: boolean;
   expiry_date: string | null;
-  item_photo_url: string | null;
+  effective_item_photo_url: string | null;
   is_active: boolean;
 }
 

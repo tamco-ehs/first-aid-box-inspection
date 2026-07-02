@@ -73,8 +73,8 @@ is not assigned to the box; `404` if the box is missing/inactive.
     "display_order":10 }],
   "last_inspection":{ "overall_status":"Pass", "created_at":"...", "inspector_name":"..." } }
 ```
-`item_photo_url` is the **effective** photo (box override else template default,
-`null` => UI placeholder).
+`item_photo_url` is the checklist/template reference photo (`null` => UI
+placeholder).
 
 ## D. `POST /api/inspections`
 Submit an inspection. Body:
@@ -160,8 +160,9 @@ form-data: file, api_key, timestamp, signature, folder
 ```
 
 ## H. `POST /api/admin/item-photo`
-Admin sets a reference photo on a template item (all boxes using it) or one box
-item (override). Exactly one id; URL must be an item-reference Cloudinary URL.
+Admin sets a reference photo on a checklist template item. All boxes using that
+item read the same photo through `box_items_effective`; URL must be an
+item-reference Cloudinary URL.
 
 ```json
 { "template_item_id":"...", "item_photo_url":"https://res.cloudinary.com/.../item-reference-photos/...webp",

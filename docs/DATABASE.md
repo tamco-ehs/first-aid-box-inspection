@@ -73,14 +73,15 @@ The expected setup of each actual box, instantiated from the template by
 `apply_template_to_box(box_id)` (idempotent - also syncs newly added template
 items onto existing boxes). Carries per-box stock state: `expiry_date` of the
 actual stock, `current_quantity` / `current_volume_level` /
-`current_present_status` (updated server-side after each inspection), and an
-optional **item photo override** for box-specific appearance.
+`current_present_status` (updated server-side after each inspection). Item
+reference photos are not duplicated here; they come from the checklist template
+item.
 
 ### `box_items_effective` (view)
 What the inspection page renders: each box item with
-`effective_item_photo_url` = box override if set, else the template reference
-photo, plus display order, criticality, and threshold metadata from the
-template. `security_invoker` - it never widens access beyond the caller's RLS.
+`effective_item_photo_url` from the template reference photo, plus display
+order, criticality, and threshold metadata from the template.
+`security_invoker` - it never widens access beyond the caller's RLS.
 
 ## Activity records
 

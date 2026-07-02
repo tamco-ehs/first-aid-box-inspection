@@ -166,17 +166,11 @@ begin
 end
 $$;
 
--- Admin uploads a reference photo on the template item (scissors) and a
--- box-specific override photo on one box item (warehouse yellow lotion).
+-- Admin uploads a reference photo on the template item.
 update public.first_aid_kit_template_items
    set item_photo_url = 'https://res.cloudinary.com/demo/image/upload/scissors-ref.jpg',
        item_photo_cloudinary_public_id = 'scissors-ref'
  where item_code = 'FA-007';
-
-update public.box_items
-   set item_photo_url = 'https://res.cloudinary.com/demo/image/upload/wh-lotion-override.jpg',
-       item_photo_cloudinary_public_id = 'wh-lotion-override'
- where id = (select wh_yellow_lotion from public.smoke_ids);
 
 -- Admin assigns first aiders: Fred -> WH; Farid -> WH + PR.
 -- (one box, many aiders / one aider, many boxes)
@@ -240,16 +234,11 @@ begin
     raise exception 'FAIL: Fred should see only his own profile';
   end if;
 
-  -- checklist cards: template photo is the default, box photo overrides
+  -- checklist cards and Box Items use the template photo as the single source
   if (select effective_item_photo_url from public.box_items_effective
        where box_id = '11111111-1111-4111-8111-111111111111' and item_code = 'FA-007')
      <> 'https://res.cloudinary.com/demo/image/upload/scissors-ref.jpg' then
     raise exception 'FAIL: template reference photo did not flow through to the checklist card';
-  end if;
-  if (select effective_item_photo_url from public.box_items_effective
-       where id = (select wh_yellow_lotion from public.smoke_ids))
-     <> 'https://res.cloudinary.com/demo/image/upload/wh-lotion-override.jpg' then
-    raise exception 'FAIL: box-level photo override did not win over the template photo';
   end if;
 
   -- privilege escalation attempts must silently match zero rows or be denied

@@ -1,7 +1,6 @@
-// POST /api/admin/item-photo - admin sets/updates a reference photo on either a
-// template item (applies to all boxes using that template) or a single box item
-// (per-box override). The URL must be a delivery URL from our Cloudinary
-// item-reference folder, or it is rejected.
+// POST /api/admin/item-photo - admin sets/updates a checklist reference photo.
+// The URL must be a delivery URL from our Cloudinary item-reference folder, or
+// it is rejected. Box Items read this same template photo source.
 
 import { requireActive, requireRole } from '@/lib/auth';
 import { badRequest, jsonOk, notFound, safe } from '@/lib/http';
@@ -39,13 +38,10 @@ export async function POST(req: Request): Promise<Response> {
       item_photo_cloudinary_public_id: body.item_photo_cloudinary_public_id ?? null,
     };
 
-    const table = body.template_item_id ? 'first_aid_kit_template_items' : 'box_items';
-    const id = body.template_item_id ?? body.box_item_id!;
-
     const { data, error } = await admin
-      .from(table)
+      .from('first_aid_kit_template_items')
       .update(patch)
-      .eq('id', id)
+      .eq('id', body.template_item_id)
       .select('id')
       .maybeSingle();
 
@@ -55,6 +51,6 @@ export async function POST(req: Request): Promise<Response> {
     }
     if (!data) throw notFound('Item not found.');
 
-    return jsonOk({ ok: true, target: table, id });
+    return jsonOk({ ok: true, target: 'first_aid_kit_template_items', id: body.template_item_id });
   });
 }

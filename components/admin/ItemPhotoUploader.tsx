@@ -7,7 +7,7 @@ import { api } from '@/lib/client/api.ts';
 import { Spinner } from '@/components/Spinner';
 import { ItemPhoto } from '@/components/ItemPhoto';
 
-// Admin reference-photo uploader for a template item or a box item. Compresses,
+// Admin reference-photo uploader for a checklist template item. Compresses,
 // signed-uploads to the item-reference folder, then persists via the admin API
 // (which re-validates the Cloudinary URL).
 export function ItemPhotoUploader({
@@ -16,7 +16,7 @@ export function ItemPhotoUploader({
   name,
   onChanged,
 }: {
-  target: { template_item_id?: string; box_item_id?: string };
+  target: { template_item_id: string };
   currentUrl: string | null;
   name: string;
   onChanged: (url: string) => void;

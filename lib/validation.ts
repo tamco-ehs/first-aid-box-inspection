@@ -110,15 +110,11 @@ export const FOLDER_BY_UPLOAD_TYPE = {
 // --- POST /api/admin/item-photo ----------------------------------------------
 export const itemPhotoSchema = z
   .object({
-    template_item_id: uuid.nullish(),
-    box_item_id: uuid.nullish(),
+    template_item_id: uuid,
     item_photo_url: z.string().url().max(500),
     item_photo_cloudinary_public_id: z.string().max(200).nullish(),
   })
-  .strict()
-  .refine((v) => Boolean(v.template_item_id) !== Boolean(v.box_item_id), {
-    message: 'Provide exactly one of template_item_id or box_item_id.',
-  });
+  .strict();
 
 // --- /api/admin/users --------------------------------------------------------
 export const adminUserCreateSchema = z

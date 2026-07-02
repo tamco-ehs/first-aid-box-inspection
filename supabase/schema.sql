@@ -198,20 +198,13 @@ create table public.box_items (
   current_present_status           text
                                    check (current_present_status is null or current_present_status in
                                           ('Present', 'Missing', 'Damaged')),
-  item_photo_url                   text
-                                   check (item_photo_url is null
-                                          or (item_photo_url like 'https://res.cloudinary.com/%'
-                                              and char_length(item_photo_url) <= 500)),
-  item_photo_cloudinary_public_id  text
-                                   check (item_photo_cloudinary_public_id is null
-                                          or char_length(item_photo_cloudinary_public_id) <= 200),
   is_active                        boolean not null default true,
   created_at                       timestamptz not null default now(),
   updated_at                       timestamptz not null default now()
 );
 
 comment on table public.box_items is
-  'Per-box expected setup, instantiated from the template via apply_template_to_box(). item_photo_url here is an optional override; the effective photo falls back to the template item photo (see box_items_effective view).';
+  'Per-box expected setup, instantiated from the template via apply_template_to_box(). Quantity and expiry may differ by box; reference photos are managed only on the checklist template item.';
 comment on column public.box_items.expiry_date is
   'Expiry of the actual stock currently in THIS box (the template only says whether the item type expires).';
 
@@ -552,7 +545,7 @@ grant  execute on function public.apply_template_to_box(uuid) to authenticated;
 
 
 -- =============================================================================
--- VIEW: box items with the EFFECTIVE photo (box override -> template default)
+-- VIEW: box items with the checklist/template reference photo
 -- =============================================================================
 -- security_invoker: the querying user's own RLS applies to the underlying
 -- tables, so this view never widens access. Phase 2 renders inspection
@@ -576,8 +569,8 @@ select
   bi.current_present_status,
   bi.is_active,
   bi.updated_at,
-  coalesce(bi.item_photo_url, ti.item_photo_url)                                 as effective_item_photo_url,
-  coalesce(bi.item_photo_cloudinary_public_id, ti.item_photo_cloudinary_public_id) as effective_item_photo_public_id,
+  ti.item_photo_url                                                              as effective_item_photo_url,
+  ti.item_photo_cloudinary_public_id                                             as effective_item_photo_public_id,
   ti.item_code,
   ti.display_order,
   ti.is_critical,
@@ -588,4 +581,4 @@ from public.box_items bi
 left join public.first_aid_kit_template_items ti on ti.id = bi.template_item_id;
 
 comment on view public.box_items_effective is
-  'Checklist cards for the inspection page: box-level photo override wins, otherwise the template reference photo. Respects the caller''s RLS (security_invoker).';
+  'Checklist cards for the inspection page and Box Items admin: item reference photos come from the checklist template item. Respects the caller''s RLS (security_invoker).';

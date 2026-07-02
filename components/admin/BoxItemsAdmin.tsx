@@ -3,8 +3,22 @@
 import { useEffect, useState } from 'react';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Spinner } from '@/components/Spinner';
-import { ItemPhotoUploader } from './ItemPhotoUploader.tsx';
-import { Notice, Section, useAsync, type AdminBox, type BoxItemRow } from './shared.tsx';
+import { ItemPhoto } from '@/components/ItemPhoto';
+import { Notice, Section, useAsync, type AdminBox } from './shared.tsx';
+
+interface BoxItemEffectiveRow {
+  id: string;
+  box_id: string;
+  item_name: string;
+  required_quantity: number | null;
+  unit: string | null;
+  measurement_type: string;
+  has_expiry: boolean;
+  expiry_date: string | null;
+  effective_item_photo_url: string | null;
+  is_active: boolean;
+  display_order: number | null;
+}
 
 export function BoxItemsAdmin() {
   const sb = getSupabaseBrowserClient();
@@ -18,7 +32,7 @@ export function BoxItemsAdmin() {
   });
 
   const [boxId, setBoxId] = useState('');
-  const [items, setItems] = useState<BoxItemRow[] | null>(null);
+  const [items, setItems] = useState<BoxItemEffectiveRow[] | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
@@ -29,13 +43,14 @@ export function BoxItemsAdmin() {
     }
     setLoadingItems(true);
     const { data, error } = await sb
-      .from('box_items')
-      .select('id, box_id, item_name, required_quantity, unit, measurement_type, has_expiry, expiry_date, item_photo_url, is_active')
+      .from('box_items_effective')
+      .select('id, box_id, item_name, required_quantity, unit, measurement_type, has_expiry, expiry_date, effective_item_photo_url, is_active, display_order')
       .eq('box_id', id)
       .eq('is_active', true)
+      .order('display_order')
       .order('item_name');
     if (error) setMsg({ kind: 'error', text: error.message });
-    setItems((data ?? []) as unknown as BoxItemRow[]);
+    setItems((data ?? []) as unknown as BoxItemEffectiveRow[]);
     setLoadingItems(false);
   }
 
@@ -51,8 +66,7 @@ export function BoxItemsAdmin() {
       {msg && <Notice kind={msg.kind}>{msg.text}</Notice>}
       <Section title="Per-box item overrides">
         <p className="mb-3 text-xs text-slate-500">
-          Override the expected quantity, expected expiry date, or reference photo for a specific box.
-          A box photo override wins over the template photo.
+          Quantity and expiry are managed per box. Reference photos come from Checklist.
         </p>
         <select className="select" value={boxId} onChange={(e) => setBoxId(e.target.value)}>
           <option value="">Select a box…</option>
@@ -89,7 +103,7 @@ function BoxItemEditor({
   onSaved,
   onError,
 }: {
-  item: BoxItemRow;
+  item: BoxItemEffectiveRow;
   onSaved: () => void;
   onError: (t: string) => void;
 }) {
@@ -119,9 +133,12 @@ function BoxItemEditor({
 
   return (
     <Section title={item.item_name}>
-      <div className="mb-3">
-        <ItemPhotoUploader target={{ box_item_id: item.id }} currentUrl={item.item_photo_url} name={item.item_name} onChanged={onSaved} />
-        <p className="mt-1 text-xs text-slate-400">Leave empty to use the template reference photo.</p>
+      <div className="mb-3 flex items-center gap-3">
+        <ItemPhoto url={item.effective_item_photo_url} name={item.item_name} className="h-14 w-14" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-900">Reference photo</p>
+          <p className="text-xs text-slate-500">Managed in Checklist</p>
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <label className="block">

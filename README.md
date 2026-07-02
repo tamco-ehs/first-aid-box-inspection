@@ -110,9 +110,9 @@ npm run build     # Next.js production build
 - **Checklist stored in database, not hard-coded:** `first_aid_kit_templates` +
   `first_aid_kit_template_items` hold the 22-item EHS baseline as editable rows
   (names, quantities, expiry rules, thresholds, photos, ordering).
-- **Item photo supported:** reference photo on each template item, optional
-  per-box override on `box_items`, resolved by the `box_items_effective` view
-  (override wins, template is the fallback; UI shows a placeholder when null).
+- **Item photo supported:** reference photo is managed on each checklist
+  template item and reused by every box through the `box_items_effective` view
+  (UI shows a placeholder when null).
 - **Box assignment supported:** `box_assignments` join table, admin-managed.
 - **One first aider, many boxes / one box, many first aiders:** M:N by design;
   verified in tests (Farid holds 2 boxes; the warehouse box has 2 aiders).

@@ -94,7 +94,7 @@ export async function GET(
       current_volume_level: it.current_volume_level,
       current_present_status: it.current_present_status,
       current_expiry_date: it.expiry_date,
-      // reference photo: box override -> template default -> null (UI placeholder)
+      // reference photo: checklist/template default -> null (UI placeholder)
       item_photo_url: it.effective_item_photo_url,
       display_order: it.display_order,
     }));
