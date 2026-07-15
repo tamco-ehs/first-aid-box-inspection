@@ -84,6 +84,7 @@ export async function GET(req: Request): Promise<Response> {
       const { data: boxRows } = await admin
         .from('boxes')
         .select('id, box_code, box_name, location_description, area')
+        .eq('is_active', true)
         .in('id', boxIds);
       for (const b of (boxRows ?? []) as {
         id: string;
@@ -99,6 +100,7 @@ export async function GET(req: Request): Promise<Response> {
           area: b.area,
         });
       }
+      rows = rows.filter((r) => boxById.has(r.box_id));
     }
 
     const actions = rows.map((a) => ({ ...a, boxes: boxById.get(a.box_id) ?? null }));

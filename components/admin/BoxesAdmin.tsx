@@ -23,29 +23,58 @@ export function BoxesAdmin() {
   });
 
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   if (boxes.loading) return <Centered />;
+  const allBoxes = boxes.data ?? [];
+  const activeBoxes = allBoxes.filter((box) => box.is_active);
+  const archivedBoxes = allBoxes.filter((box) => !box.is_active);
+  const visibleBoxes = showArchived ? archivedBoxes : activeBoxes;
+
   return (
     <div className="space-y-4">
       {msg && <Notice kind={msg.kind}>{msg.text}</Notice>}
       {boxes.error && <Notice kind="error">{boxes.error}</Notice>}
 
-      <NewBoxForm
-        templates={templates.data ?? []}
-        onCreated={() => {
-          setMsg({ kind: 'ok', text: 'Box created and checklist items added.' });
-          boxes.reload();
-        }}
-        onError={(t) => setMsg({ kind: 'error', text: t })}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <NewBoxForm
+          templates={templates.data ?? []}
+          onCreated={() => {
+            setMsg({ kind: 'ok', text: 'Box created and checklist items added.' });
+            boxes.reload();
+          }}
+          onError={(t) => setMsg({ kind: 'error', text: t })}
+        />
+        <button
+          type="button"
+          onClick={() => setShowArchived((current) => !current)}
+          className="btn btn-md btn-secondary"
+        >
+          {showArchived ? `Show active (${activeBoxes.length})` : `Archived (${archivedBoxes.length})`}
+        </button>
+      </div>
 
-      {(boxes.data ?? []).map((box) => (
+      {visibleBoxes.length === 0 && (
+        <div className="card p-8 text-center text-sm text-slate-500">
+          {showArchived ? 'No archived boxes.' : 'No active boxes found.'}
+        </div>
+      )}
+
+      {visibleBoxes.map((box) => (
         <BoxRow
           key={box.id}
           box={box}
           templates={templates.data ?? []}
           onSaved={() => {
             setMsg({ kind: 'ok', text: `Saved ${box.box_code}.` });
+            boxes.reload();
+          }}
+          onArchived={() => {
+            setMsg({ kind: 'ok', text: `${box.box_code} removed from active boxes.` });
+            boxes.reload();
+          }}
+          onRestored={() => {
+            setMsg({ kind: 'ok', text: `${box.box_code} restored.` });
             boxes.reload();
           }}
           onError={(t) => setMsg({ kind: 'error', text: t })}
@@ -158,11 +187,15 @@ function BoxRow({
   box,
   templates,
   onSaved,
+  onArchived,
+  onRestored,
   onError,
 }: {
   box: AdminBox;
   templates: TemplateRow[];
   onSaved: () => void;
+  onArchived: () => void;
+  onRestored: () => void;
   onError: (t: string) => void;
 }) {
   const sb = getSupabaseBrowserClient();
@@ -197,11 +230,20 @@ function BoxRow({
   }
 
   async function toggleActive() {
+    if (box.is_active) {
+      const confirmed = window.confirm(
+        `Remove ${box.box_code} from active boxes? It will be hidden from inspections, reminders, assignments, box items, and active action lists. Historical records are kept.`,
+      );
+      if (!confirmed) return;
+    }
+
     setBusy(true);
     try {
-      const { error } = await sb.from('boxes').update({ is_active: !box.is_active }).eq('id', box.id);
+      const nextActive = !box.is_active;
+      const { error } = await sb.from('boxes').update({ is_active: nextActive }).eq('id', box.id);
       if (error) throw new Error(error.message);
-      onSaved();
+      if (nextActive) onRestored();
+      else onArchived();
     } catch (e) {
       onError(e instanceof Error ? e.message : 'Could not update.');
     } finally {
@@ -296,8 +338,8 @@ function BoxRow({
         <button onClick={save} disabled={busy} className="btn btn-md btn-primary">
           {busy ? <Spinner className="h-4 w-4" /> : 'Save'}
         </button>
-        <button onClick={toggleActive} disabled={busy} className="btn btn-md btn-secondary">
-          {box.is_active ? 'Deactivate' : 'Activate'}
+        <button onClick={toggleActive} disabled={busy} className={`btn btn-md ${box.is_active ? 'btn-danger' : 'btn-secondary'}`}>
+          {box.is_active ? 'Remove box' : 'Restore box'}
         </button>
       </div>
     </Section>
