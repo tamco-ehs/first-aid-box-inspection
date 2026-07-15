@@ -57,7 +57,7 @@ export function ExpiringItemsAdmin() {
     setMsg(null);
     const [{ data: itemRows, error: itemErr }, { data: boxRows, error: boxErr }] = await Promise.all([
       sb
-        .from('box_items')
+        .from('box_items_effective')
         .select('id, box_id, item_name, required_quantity, current_quantity, unit, expiry_date')
         .eq('is_active', true)
         .eq('has_expiry', true)

@@ -34,8 +34,8 @@ export function TemplateAdmin() {
       {data.templates.map((t) => (
         <Section key={t.id} title={t.template_name} actions={<Badge tone={t.is_active ? 'ok' : 'neutral'}>{t.is_active ? 'Active' : 'Inactive'}</Badge>}>
           <p className="mb-2 text-xs text-slate-500">
-            Edit the baseline checklist. Changes apply to new boxes; existing boxes keep their items
-            until re-synced.
+            Edit the baseline checklist. Shared item details sync to existing boxes; per-box quantity
+            and expiry dates stay separate.
           </p>
           <div className="space-y-3">
             {data.items
@@ -71,13 +71,28 @@ function TemplateItemEditor({
   const [f, setF] = useState(item);
   const [busy, setBusy] = useState(false);
 
+  async function applyTemplateToActiveBoxes() {
+    const { data: boxes, error: boxesError } = await sb
+      .from('boxes')
+      .select('id')
+      .eq('template_id', item.template_id)
+      .eq('is_active', true);
+    if (boxesError) throw new Error(boxesError.message);
+
+    for (const box of (boxes ?? []) as { id: string }[]) {
+      const { error } = await sb.rpc('apply_template_to_box', { p_box_id: box.id });
+      if (error) throw new Error(error.message);
+    }
+  }
+
   async function save() {
     setBusy(true);
     try {
+      const itemName = f.item_name.trim();
       const { error } = await sb
         .from('first_aid_kit_template_items')
         .update({
-          item_name: f.item_name.trim(),
+          item_name: itemName,
           required_quantity: f.required_quantity,
           unit: f.unit?.trim() || null,
           measurement_type: f.measurement_type,
@@ -88,6 +103,19 @@ function TemplateItemEditor({
         })
         .eq('id', item.id);
       if (error) throw new Error(error.message);
+
+      const { error: syncError } = await sb
+        .from('box_items')
+        .update({
+          item_name: itemName,
+          unit: f.unit?.trim() || null,
+          measurement_type: f.measurement_type,
+          has_expiry: f.has_expiry,
+        })
+        .eq('template_item_id', item.id);
+      if (syncError) throw new Error(`Saved checklist item, but existing boxes were not updated: ${syncError.message}`);
+
+      await applyTemplateToActiveBoxes();
       onSaved();
     } catch (e) {
       onError(e instanceof Error ? e.message : 'Could not save.');
@@ -97,9 +125,22 @@ function TemplateItemEditor({
   }
 
   async function toggleActive() {
-    const { error } = await sb.from('first_aid_kit_template_items').update({ is_active: !item.is_active }).eq('id', item.id);
-    if (error) onError(error.message);
-    else onSaved();
+    setBusy(true);
+    try {
+      const nextActive = !item.is_active;
+      const { error } = await sb.from('first_aid_kit_template_items').update({ is_active: nextActive }).eq('id', item.id);
+      if (error) throw new Error(error.message);
+
+      const { error: syncError } = await sb.from('box_items').update({ is_active: nextActive }).eq('template_item_id', item.id);
+      if (syncError) throw new Error(`Updated checklist item, but existing boxes were not updated: ${syncError.message}`);
+
+      if (nextActive) await applyTemplateToActiveBoxes();
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not update item status.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -146,7 +187,7 @@ function TemplateItemEditor({
         <button onClick={save} disabled={busy} className="btn btn-md btn-primary">
           {busy ? <Spinner className="h-4 w-4" /> : 'Save'}
         </button>
-        <button onClick={toggleActive} className="btn btn-md btn-secondary">
+        <button onClick={toggleActive} disabled={busy} className="btn btn-md btn-secondary">
           {item.is_active ? 'Deactivate' : 'Activate'}
         </button>
       </div>

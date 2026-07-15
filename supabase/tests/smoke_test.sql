@@ -169,7 +169,8 @@ $$;
 -- Admin uploads a reference photo on the template item.
 update public.first_aid_kit_template_items
    set item_photo_url = 'https://res.cloudinary.com/demo/image/upload/scissors-ref.jpg',
-       item_photo_cloudinary_public_id = 'scissors-ref'
+       item_photo_cloudinary_public_id = 'scissors-ref',
+       item_name = 'Scissors updated'
  where item_code = 'FA-007';
 
 -- Admin assigns first aiders: Fred -> WH; Farid -> WH + PR.
@@ -239,6 +240,11 @@ begin
        where box_id = '11111111-1111-4111-8111-111111111111' and item_code = 'FA-007')
      <> 'https://res.cloudinary.com/demo/image/upload/scissors-ref.jpg' then
     raise exception 'FAIL: template reference photo did not flow through to the checklist card';
+  end if;
+  if (select item_name from public.box_items_effective
+       where box_id = '11111111-1111-4111-8111-111111111111' and item_code = 'FA-007')
+     <> 'Scissors updated' then
+    raise exception 'FAIL: template item name did not flow through to the checklist card';
   end if;
 
   -- privilege escalation attempts must silently match zero rows or be denied

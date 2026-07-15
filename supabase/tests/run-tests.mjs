@@ -31,6 +31,7 @@ const steps = [
   ['supabase/box_expiry_start_date.sql', 'boxes: expiry start date migration'],
   ['supabase/remove_box_item_photo_override.sql', 'items: single checklist photo source'],
   ['supabase/seed.sql',             'seed: baseline template, 22 items, 2 boxes'],
+  ['supabase/sync_template_item_metadata.sql', 'items: sync checklist metadata to boxes'],
   ['supabase/superadmin_roles.sql',  'roles: superadmin/admin/user migration'],
   ['supabase/email_reminder_cycles.sql', 'reminders: cycle dedup migration'],
   ['supabase/tests/smoke_test.sql', 'RLS smoke tests (all roles, all tables)'],
