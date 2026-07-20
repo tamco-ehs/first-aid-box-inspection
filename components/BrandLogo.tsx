@@ -13,7 +13,7 @@ export function TamcoLogo({
 }) {
   return (
     <span
-      className={`inline-flex items-center justify-center overflow-hidden rounded-xl bg-slate-950 px-3 py-2 shadow-sm ${className}`}
+      className={`inline-flex items-center justify-center overflow-hidden rounded-xl bg-brand px-3 py-2 shadow-sm ${className}`}
     >
       <Image
         src={TAMCO_LOGO_SRC}
