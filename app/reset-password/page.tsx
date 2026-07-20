@@ -7,6 +7,9 @@ import { validatePasswordReset } from '@/lib/logic/password-reset';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 
 type RecoveryStatus = 'checking' | 'ready' | 'invalid' | 'saved';
+type RecoveryResult = { ok: true } | { ok: false; message: string };
+
+let currentRecovery: { key: string; promise: Promise<RecoveryResult> } | null = null;
 
 function recoveryMessage(message: string): string {
   if (/expired|invalid|otp|token|session/i.test(message)) {
@@ -15,27 +18,38 @@ function recoveryMessage(message: string): string {
   return 'Could not verify the reset link. Please request a new one.';
 }
 
-export default function ResetPasswordPage() {
-  const [status, setStatus] = useState<RecoveryStatus>('checking');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+function recoveryErrorFromUrl(url: URL, hashParams: URLSearchParams): string | null {
+  const errorCode = url.searchParams.get('error_code') ?? hashParams.get('error_code');
+  const errorDescription = url.searchParams.get('error_description') ?? hashParams.get('error_description');
+  const error = url.searchParams.get('error') ?? hashParams.get('error');
 
-  useEffect(() => {
-    let active = true;
+  if (!error && !errorCode && !errorDescription) return null;
+  if (errorCode === 'otp_expired' || /expired|invalid/i.test(errorDescription ?? '')) {
+    return 'This reset link is invalid or expired. Request one new link, then use the newest email only.';
+  }
+  return errorDescription ?? 'Could not verify the reset link. Please request a new one.';
+}
 
-    async function prepareRecoverySession() {
-      const supabase = getSupabaseBrowserClient();
-      const url = new URL(window.location.href);
-      const code = url.searchParams.get('code');
-      const tokenHash = url.searchParams.get('token_hash');
-      const type = url.searchParams.get('type');
-      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-      const accessToken = hashParams.get('access_token');
-      const refreshToken = hashParams.get('refresh_token');
+async function prepareRecoverySession(): Promise<RecoveryResult> {
+  const supabase = getSupabaseBrowserClient();
+  const url = new URL(window.location.href);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const code = url.searchParams.get('code');
+  const tokenHash = url.searchParams.get('token_hash');
+  const type = url.searchParams.get('type');
+  const accessToken = hashParams.get('access_token');
+  const refreshToken = hashParams.get('refresh_token');
+  const urlError = recoveryErrorFromUrl(url, hashParams);
+  const key = code ?? tokenHash ?? accessToken ?? urlError ?? 'existing-session';
 
+  if (currentRecovery?.key === key) return currentRecovery.promise;
+
+  currentRecovery = {
+    key,
+    promise: (async () => {
       try {
+        if (urlError) return { ok: false, message: urlError };
+
         if (code) {
           const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
           if (exchangeError) throw exchangeError;
@@ -51,23 +65,47 @@ export default function ResetPasswordPage() {
         }
 
         const { data } = await supabase.auth.getSession();
-        if (!active) return;
         if (!data.session) {
-          setStatus('invalid');
-          setError('This reset link is invalid or expired. Please request a new one.');
-          return;
+          return {
+            ok: false,
+            message: 'This reset link is invalid or expired. Please request a new one.',
+          };
         }
 
-        window.history.replaceState(null, '', '/reset-password');
-        setStatus('ready');
+        return { ok: true };
       } catch (e) {
-        if (!active) return;
-        setStatus('invalid');
-        setError(e instanceof Error ? recoveryMessage(e.message) : 'Could not verify the reset link.');
+        return {
+          ok: false,
+          message: e instanceof Error ? recoveryMessage(e.message) : 'Could not verify the reset link.',
+        };
       }
-    }
+    })(),
+  };
 
-    prepareRecoverySession();
+  return currentRecovery.promise;
+}
+
+export default function ResetPasswordPage() {
+  const [status, setStatus] = useState<RecoveryStatus>('checking');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    prepareRecoverySession().then((result) => {
+      if (!active) return;
+      window.history.replaceState(null, '', '/reset-password');
+      if (result.ok) {
+        setStatus('ready');
+        return;
+      }
+      setStatus('invalid');
+      setError(result.message);
+    });
+
     return () => {
       active = false;
     };
@@ -131,6 +169,9 @@ export default function ResetPasswordPage() {
         {status === 'invalid' ? (
           <>
             {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>}
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+              Request only one reset email, wait for it to arrive, then open the newest link. Supabase may block repeated requests for about 60 seconds.
+            </p>
             <Link href="/forgot-password" className="btn btn-lg btn-primary w-full">
               Request new link
             </Link>

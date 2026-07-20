@@ -3,7 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
+import { isPasswordResetRateLimit } from '@/lib/logic/password-reset';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+
+const RESET_COOLDOWN_SECONDS = 60;
 
 function appBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '');
@@ -13,7 +16,7 @@ function appBaseUrl(): string {
 }
 
 function friendlyResetError(message: string): string {
-  if (/rate|security purposes/i.test(message)) return 'Too many reset requests. Please wait a moment and try again.';
+  if (isPasswordResetRateLimit(message)) return 'Too many reset requests. Please wait 60 seconds, then request a new link.';
   if (/redirect|not allowed|uri/i.test(message)) return 'Password reset is not fully configured. Please contact EHS/Admin.';
   return 'Could not send the reset email. Please try again.';
 }
@@ -23,15 +26,24 @@ export default function ForgotPasswordPage() {
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setEmail(params.get('email') ?? '');
   }, []);
 
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = window.setInterval(() => {
+      setCooldown((current) => Math.max(0, current - 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [cooldown]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || cooldown > 0) return;
     setSubmitting(true);
     setError(null);
 
@@ -41,11 +53,13 @@ export default function ForgotPasswordPage() {
 
     if (resetError) {
       setError(friendlyResetError(resetError.message));
+      if (isPasswordResetRateLimit(resetError.message)) setCooldown(RESET_COOLDOWN_SECONDS);
       setSubmitting(false);
       return;
     }
 
     setSent(true);
+    setCooldown(RESET_COOLDOWN_SECONDS);
     setSubmitting(false);
   }
 
@@ -74,15 +88,26 @@ export default function ForgotPasswordPage() {
         </label>
 
         {sent && (
-          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-            If this email belongs to an active account, a reset link has been sent. Open the link to set a new password.
-          </p>
+          <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+            <p>If this email belongs to an active account, a reset link has been sent.</p>
+            <p className="mt-1 text-xs">
+              Use the newest email only. Older reset links stop working after a new request.
+            </p>
+          </div>
         )}
 
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>}
 
-        <button type="submit" disabled={submitting || !email.trim()} className="btn btn-lg btn-primary w-full">
-          {submitting ? <Spinner className="h-5 w-5" /> : sent ? 'Send again' : 'Send reset link'}
+        <button type="submit" disabled={submitting || cooldown > 0 || !email.trim()} className="btn btn-lg btn-primary w-full">
+          {submitting ? (
+            <Spinner className="h-5 w-5" />
+          ) : cooldown > 0 ? (
+            `Send again in ${cooldown}s`
+          ) : sent ? (
+            'Send again'
+          ) : (
+            'Send reset link'
+          )}
         </button>
 
         <Link href="/login" className="btn btn-lg btn-secondary w-full">
