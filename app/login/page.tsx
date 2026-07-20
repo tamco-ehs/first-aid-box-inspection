@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { api } from '@/lib/client/api.ts';
@@ -113,7 +114,15 @@ export default function LoginPage() {
           />
         </label>
         <label className="block">
-          <span className="label">Password</span>
+          <span className="label flex items-center justify-between gap-2">
+            <span>Password</span>
+            <Link
+              href={email.trim() ? `/forgot-password?email=${encodeURIComponent(email.trim())}` : '/forgot-password'}
+              className="text-xs font-semibold text-brand"
+            >
+              Forgot password?
+            </Link>
+          </span>
           <input
             type="password"
             autoComplete="current-password"
