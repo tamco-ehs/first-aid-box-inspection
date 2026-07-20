@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api, ApiClientError, type UsageSubmitBody } from '@/lib/client/api.ts';
+import { TamcoBrandLockup } from '@/components/BrandLogo';
 import { Spinner } from '@/components/Spinner';
 
 export default function UsagePage() {
@@ -102,9 +103,6 @@ function UsageInner() {
   return (
     <Shell>
       <div className="mb-4 text-center">
-        <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand text-2xl text-white">
-          ✚
-        </div>
         <h1 className="text-xl font-bold">Record First Aid Usage</h1>
         <p className="text-sm text-slate-500">{boxCode ? `Box: ${boxCode}` : 'Thank you for reporting.'}</p>
       </div>
@@ -165,5 +163,10 @@ function UsageInner() {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-6">{children}</main>;
+  return (
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-6">
+      <TamcoBrandLockup subtitle="First aid usage and inspection system" className="mb-6" priority titleAs="p" />
+      {children}
+    </main>
+  );
 }

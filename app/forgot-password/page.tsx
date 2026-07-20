@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { TamcoBrandLockup } from '@/components/BrandLogo';
 import { Spinner } from '@/components/Spinner';
 import { isPasswordResetRateLimit } from '@/lib/logic/password-reset';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -65,13 +66,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-6">
-      <div className="mb-8 text-center">
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand text-3xl text-white">
-          +
-        </div>
-        <h1 className="text-2xl font-bold">Reset Password</h1>
-        <p className="text-sm text-slate-500">Get a secure reset link by email</p>
-      </div>
+      <TamcoBrandLockup title="Reset Password" subtitle="Get a secure reset link by email" className="mb-8" priority />
 
       <form onSubmit={onSubmit} className="card space-y-4 p-6">
         <label className="block">

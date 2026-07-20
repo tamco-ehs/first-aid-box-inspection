@@ -1,10 +1,13 @@
 // Shown by the service worker when a navigation fails offline. Intentionally
 // static and data-free.
-export const metadata = { title: 'Offline - First Aid Box Inspection' };
+import { TamcoBrandLockup } from '@/components/BrandLogo';
+
+export const metadata = { title: 'Offline - TAMCO First Aid Box Inspection' };
 
 export default function OfflinePage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 p-6 text-center">
+      <TamcoBrandLockup subtitle="Offline mode" titleAs="p" />
       <div className="text-5xl">📴</div>
       <h1 className="text-xl font-bold">You are offline</h1>
       <p className="text-slate-600">

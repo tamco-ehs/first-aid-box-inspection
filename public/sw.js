@@ -9,7 +9,7 @@
  * this file - it is handled by the localStorage draft utility, which works
  * even with no service worker at all.
  */
-const VERSION = 'fais-v1';
+const VERSION = 'fais-v2';
 const PRECACHE = `${VERSION}-precache`;
 const RUNTIME = `${VERSION}-runtime`;
 const OFFLINE_URL = '/offline';
@@ -19,7 +19,13 @@ self.addEventListener('install', (event) => {
     caches
       .open(PRECACHE)
       .then((cache) =>
-        cache.addAll([OFFLINE_URL, '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png']),
+        cache.addAll([
+          OFFLINE_URL,
+          '/manifest.webmanifest',
+          '/icons/icon.svg',
+          '/icons/icon-192.png',
+          '/brand/tamco-logo-white.png',
+        ]),
       )
       .then(() => self.skipWaiting())
       .catch(() => undefined),
@@ -52,7 +58,11 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Immutable static assets: cache-first.
-  if (url.pathname.startsWith('/_next/static') || url.pathname.startsWith('/icons/')) {
+  if (
+    url.pathname.startsWith('/_next/static') ||
+    url.pathname.startsWith('/icons/') ||
+    url.pathname.startsWith('/brand/')
+  ) {
     event.respondWith(
       caches.match(req).then(
         (cached) =>

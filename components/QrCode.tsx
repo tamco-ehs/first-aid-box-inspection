@@ -2,6 +2,7 @@
 
 import { useRef } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
+import { TamcoLogo } from '@/components/BrandLogo';
 
 type QrPurpose = 'inspection' | 'usage';
 
@@ -53,9 +54,10 @@ export function QrCode({
     return sourceRef.current?.querySelector('canvas') ?? previewRef.current?.querySelector('canvas') ?? null;
   }
 
-  function makeLabelDataUrl(): string | null {
+  async function makeLabelDataUrl(): Promise<string | null> {
     const qr = getCanvas();
     if (!qr) return null;
+    const logo = await loadImage('/brand/tamco-logo-white.png').catch(() => null);
 
     const canvas = document.createElement('canvas');
     canvas.width = 900;
@@ -72,12 +74,13 @@ export function QrCode({
       location: location ?? '',
       area: area ?? '',
       meta,
+      logo,
     });
     return canvas.toDataURL('image/png');
   }
 
-  function download() {
-    const dataUrl = makeLabelDataUrl();
+  async function download() {
+    const dataUrl = await makeLabelDataUrl();
     if (!dataUrl) return;
     const a = document.createElement('a');
     a.href = dataUrl;
@@ -87,8 +90,8 @@ export function QrCode({
     document.body.removeChild(a);
   }
 
-  function print() {
-    const dataUrl = makeLabelDataUrl();
+  async function print() {
+    const dataUrl = await makeLabelDataUrl();
     if (!dataUrl) return;
     const w = window.open('', '_blank', 'width=620,height=760');
     if (!w) return;
@@ -107,7 +110,7 @@ export function QrCode({
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-brand">Tamco EHS</p>
+          <TamcoLogo className="mb-2 h-7 w-20 rounded-md bg-brand px-2 py-1 shadow-none" />
           <p className="text-sm font-bold text-slate-950">{meta.title}</p>
           <p className="text-xs text-slate-500">{meta.audience}</p>
         </div>
@@ -153,6 +156,7 @@ function drawLabel(
     location: string;
     area: string;
     meta: { title: string; action: string; audience: string; accent: string; soft: string };
+    logo: HTMLImageElement | null;
   },
 ) {
   const { qr, value, boxCode, boxName, location, area, meta } = opts;
@@ -164,9 +168,14 @@ function drawLabel(
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, 22, 900, 126);
 
+  if (opts.logo) {
+    ctx.drawImage(opts.logo, 64, 44, 240, 72);
+  } else {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 34px Arial, Helvetica, sans-serif';
+    ctx.fillText('TAMCO EHS', 64, 78);
+  }
   ctx.fillStyle = '#ffffff';
-  ctx.font = '700 34px Arial, Helvetica, sans-serif';
-  ctx.fillText('TAMCO EHS', 64, 78);
   ctx.font = '800 42px Arial, Helvetica, sans-serif';
   ctx.fillText('FIRST AID BOX', 64, 126);
 
@@ -271,6 +280,15 @@ function safeHost(value: string): string {
   } catch {
     return '';
   }
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
 }
 
 function escapeAttr(value: string): string {

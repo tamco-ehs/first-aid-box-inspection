@@ -6,10 +6,10 @@ import { ServiceWorkerRegister } from '@/components/ServiceWorkerRegister';
 // The <meta robots> half of the no-index requirement (the other two are
 // public/robots.txt and the X-Robots-Tag header in next.config.mjs).
 export const metadata: Metadata = {
-  title: 'First Aid Box Inspection',
-  description: 'Internal first aid box inspection system.',
+  title: 'TAMCO First Aid Box Inspection',
+  description: 'TAMCO internal first aid box inspection system.',
   manifest: '/manifest.webmanifest',
-  appleWebApp: { capable: true, statusBarStyle: 'default', title: 'First Aid' },
+  appleWebApp: { capable: true, statusBarStyle: 'default', title: 'TAMCO First Aid' },
   robots: {
     index: false,
     follow: false,

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api, ApiClientError } from '@/lib/client/api.ts';
 import { setIntendedPath } from '@/lib/client/intent.ts';
 import type { Me, Role } from '@/lib/client/types.ts';
+import { TamcoBrandLockup } from '@/components/BrandLogo';
 import { FullScreenLoader } from '@/components/Spinner';
 
 // Client-side guard. The real enforcement is server-side in every API route;
@@ -61,6 +62,7 @@ export function AccessBlocked({
 }) {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 p-6 text-center">
+      <TamcoBrandLockup subtitle="Access control" className="mb-1" titleAs="p" />
       <div className="text-5xl">🔒</div>
       <h1 className="text-xl font-bold">Access blocked</h1>
       <p className="text-slate-600">{message}</p>

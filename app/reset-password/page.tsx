@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { TamcoBrandLockup } from '@/components/BrandLogo';
 import { Spinner, FullScreenLoader } from '@/components/Spinner';
 import { validatePasswordReset } from '@/lib/logic/password-reset';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -144,8 +145,8 @@ export default function ResetPasswordPage() {
   if (status === 'saved') {
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-6">
+        <TamcoBrandLockup title="Password Updated" subtitle="TAMCO EHS readiness system" className="mb-8" priority />
         <div className="card space-y-4 p-6 text-center">
-          <h1 className="text-2xl font-bold">Password Updated</h1>
           <p className="text-sm text-slate-500">Your password has been changed. Sign in with the new password.</p>
           <Link href="/login" className="btn btn-lg btn-primary w-full">
             Go to sign in
@@ -157,13 +158,7 @@ export default function ResetPasswordPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-6">
-      <div className="mb-8 text-center">
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand text-3xl text-white">
-          +
-        </div>
-        <h1 className="text-2xl font-bold">Set New Password</h1>
-        <p className="text-sm text-slate-500">Use a new password for your account</p>
-      </div>
+      <TamcoBrandLockup title="Set New Password" subtitle="Use a new password for your account" className="mb-8" priority />
 
       <form onSubmit={onSubmit} className="card space-y-4 p-6">
         {status === 'invalid' ? (

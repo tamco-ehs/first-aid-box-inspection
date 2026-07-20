@@ -1,3 +1,5 @@
+import { TamcoLogo } from '@/components/BrandLogo';
+
 export function Spinner({ className = 'h-5 w-5' }: { className?: string }) {
   return (
     <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -10,6 +12,7 @@ export function Spinner({ className = 'h-5 w-5' }: { className?: string }) {
 export function FullScreenLoader({ label = 'Loading…' }: { label?: string }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-3 text-slate-500">
+      <TamcoLogo className="mb-2 h-10 w-28 rounded-lg bg-brand px-3 py-2 shadow-none" priority />
       <Spinner className="h-8 w-8" />
       <p className="text-sm">{label}</p>
     </div>

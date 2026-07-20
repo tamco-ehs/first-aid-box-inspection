@@ -1,7 +1,7 @@
 {
-  "name": "First Aid Box Inspection",
-  "short_name": "First Aid",
-  "description": "Inspect first aid boxes, record usage, and track restocks.",
+  "name": "TAMCO First Aid Box Inspection",
+  "short_name": "TAMCO First Aid",
+  "description": "TAMCO first aid box inspections, usage records, and restock tracking.",
   "start_url": "/login",
   "scope": "/",
   "display": "standalone",
