@@ -6,6 +6,7 @@
 
 import type {
   ActionsResponse,
+  InspectionDetail,
   InspectionTemplateResponse,
   ItemCheckStatus,
   Me,
@@ -138,6 +139,7 @@ export const api = {
   submitUsage: (body: UsageSubmitBody) =>
     request<{ ok: boolean; message: string }>('/api/usage', { method: 'POST', body: JSON.stringify(body) }),
   reports: (query: string) => request<ReportsResponse>(`/api/reports${query ? `?${query}` : ''}`),
+  inspection: (id: string) => request<InspectionDetail>(`/api/inspections/${encodeURIComponent(id)}`),
   adminUsers: () => request<{ users: Me[] }>('/api/admin/users'),
   createAdminUser: (body: AdminUserBody) =>
     request<{ ok: boolean; user: Me }>('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),

@@ -9,6 +9,7 @@ import { formatDate, formatDateTime, todayIso } from '@/lib/client/format.ts';
 import { RequireAuth } from '@/components/RequireAuth';
 import { AppHeader } from '@/components/AppHeader';
 import { EshNav } from '@/components/esh/EshNav';
+import { InspectionDetailModal } from '@/components/esh/InspectionDetailModal';
 import { Spinner } from '@/components/Spinner';
 import { ActionStatusBadge, Badge, PriorityBadge, ReadinessBadge } from '@/components/StatusBadge';
 
@@ -30,6 +31,7 @@ function Dashboard({ me }: { me: Me }) {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('inspections');
   const reportsRef = useRef<HTMLDivElement | null>(null);
+  const [openInspectionId, setOpenInspectionId] = useState<string | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [boxId, setBoxId] = useState('');
@@ -169,12 +171,19 @@ function Dashboard({ me }: { me: Me }) {
               ))}
             </div>
 
-            {tab === 'inspections' && <InspectionsReport data={data} boxCode={boxCode} />}
+            {tab === 'inspections' && (
+              <InspectionsReport data={data} boxCode={boxCode} onSelect={setOpenInspectionId} />
+            )}
             {tab === 'actions' && <ActionsReport data={data} boxCode={boxCode} />}
             {tab === 'usage' && <UsageReport data={data} boxCode={boxCode} />}
           </>
         )}
       </main>
+
+      <InspectionDetailModal
+        inspectionId={openInspectionId}
+        onClose={() => setOpenInspectionId(null)}
+      />
     </>
   );
 }
@@ -706,7 +715,15 @@ function ExportBar({ onExport }: { onExport: () => void }) {
   );
 }
 
-function InspectionsReport({ data, boxCode }: { data: ReportsResponse; boxCode: Map<string, string> }) {
+function InspectionsReport({
+  data,
+  boxCode,
+  onSelect,
+}: {
+  data: ReportsResponse;
+  boxCode: Map<string, string>;
+  onSelect: (id: string) => void;
+}) {
   const rows = data.inspections;
   if (rows.length === 0) return <Empty label="No inspections in range." />;
   return (
@@ -727,25 +744,33 @@ function InspectionsReport({ data, boxCode }: { data: ReportsResponse; boxCode: 
           )
         }
       />
+      <p className="mb-2 text-xs text-slate-400">Tap an inspection to see the full detail.</p>
       <div className="space-y-2 md:hidden">
         {rows.map((r) => (
-          <div key={r.id} className="card flex items-center justify-between p-3">
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => onSelect(r.id)}
+            className="card flex w-full items-center justify-between p-3 text-left active:bg-slate-50"
+          >
             <div>
               <p className="font-semibold">{r.boxes?.box_code ?? '—'}</p>
               <p className="text-xs text-slate-500">{formatDateTime(r.created_at)} · {r.inspector_name}</p>
             </div>
             <ReadinessBadge status={r.overall_status} />
-          </div>
+          </button>
         ))}
       </div>
       <Table
-        head={['Date', 'Box', 'Inspector', 'Seal', 'Status']}
+        head={['Date', 'Box', 'Inspector', 'Seal', 'Status', '']}
+        onRowClick={(i) => onSelect(rows[i]!.id)}
         rows={rows.map((r) => [
           formatDateTime(r.created_at),
           r.boxes?.box_code ?? '—',
           r.inspector_name,
           r.seal_intact === false ? 'Broken' : 'Intact',
           <ReadinessBadge key="s" status={r.overall_status} />,
+          <span key="v" className="font-semibold text-brand">View ›</span>,
         ])}
       />
     </section>
@@ -824,7 +849,16 @@ function UsageReport({ data, boxCode }: { data: ReportsResponse; boxCode: Map<st
   );
 }
 
-function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
+function Table({
+  head,
+  rows,
+  onRowClick,
+}: {
+  head: string[];
+  rows: React.ReactNode[][];
+  /** When given, each row becomes clickable (used to open inspection detail). */
+  onRowClick?: (index: number) => void;
+}) {
   return (
     <div className="hidden overflow-x-auto md:block">
       <table className="w-full border-collapse text-sm">
@@ -837,7 +871,13 @@ function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className="border-b border-slate-100">
+            <tr
+              key={i}
+              className={`border-b border-slate-100 ${
+                onRowClick ? 'cursor-pointer hover:bg-slate-50' : ''
+              }`}
+              onClick={onRowClick ? () => onRowClick(i) : undefined}
+            >
               {r.map((cell, j) => (
                 <td key={j} className="px-3 py-2 align-top">{cell}</td>
               ))}

@@ -192,6 +192,52 @@ export interface ReportInspection {
   boxes: { box_code: string; box_name: string; area: string | null } | null;
 }
 
+/** Full detail of one inspection (GET /api/inspections/[id]). */
+export interface InspectionDetailItem {
+  id: string;
+  item_name: string;
+  required_quantity: number | null;
+  observed_quantity: number | null;
+  expiry_date: string | null;
+  item_status: string | null;
+  remarks: string | null;
+}
+
+export interface InspectionDetail {
+  inspection: {
+    id: string;
+    box_id: string;
+    created_at: string;
+    inspector_name: string;
+    inspector_department: string | null;
+    overall_status: string;
+    box_accessible: boolean | null;
+    box_clean: boolean | null;
+    seal_intact: boolean | null;
+    contact_visible: boolean | null;
+    item_check_performed: boolean;
+    box_photo_url: string | null;
+    notes: string | null;
+    submitted_device: string | null;
+  };
+  box: {
+    box_code: string;
+    box_name: string;
+    location_description: string;
+    area: string | null;
+  } | null;
+  items: InspectionDetailItem[];
+  actions: {
+    id: string;
+    action_code: string;
+    action_type: ActionType;
+    category: 'quick_check' | 'item';
+    item_name: string | null;
+    priority: Priority | null;
+    status: ActionStatus;
+  }[];
+}
+
 export interface ReportUsage {
   id: string;
   box_id: string;
