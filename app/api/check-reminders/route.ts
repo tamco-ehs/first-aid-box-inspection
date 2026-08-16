@@ -23,6 +23,7 @@ import {
   type ReminderSummaryItem,
 } from '@/lib/email';
 import { ensureExpiredItemActions } from '@/lib/server/expired-actions';
+import { resolveAllOpenActions } from '@/lib/server/resolve-actions.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -468,6 +469,8 @@ export async function GET(req: Request): Promise<Response> {
 
     const { error: keepAliveErr } = await admin.from('boxes').select('id').limit(1);
     await ensureExpiredItemActions(admin);
+    // ...and close the ones already fixed, so reminders reflect real issues.
+    await resolveAllOpenActions(admin);
 
     const boxes = await getActiveBoxes(admin);
     const boxesById = new Map(boxes.map((box) => [box.id, box]));

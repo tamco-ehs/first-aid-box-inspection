@@ -8,6 +8,7 @@ import { jsonOk, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { compareByDue, computeBoxDue } from '@/lib/logic/due.ts';
 import { primaryAction, statusTag } from '@/lib/logic/actions.ts';
+import { resolveBoxActions } from '@/lib/server/resolve-actions.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -86,6 +87,10 @@ export async function GET(): Promise<Response> {
     for (const row of (inspData ?? []) as { box_id: string; created_at: string }[]) {
       if (!lastInspectionByBox.has(row.box_id)) lastInspectionByBox.set(row.box_id, row.created_at);
     }
+
+    // Clear anything already fixed (restocked / expiry revised) before counting,
+    // so a box stops showing "Issue Found" once the problem is gone.
+    await resolveBoxActions(admin, boxIds);
 
     // Open actions per box drive the "Issue Found" badge + readiness.
     const { data: openActs } = await admin

@@ -9,6 +9,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { computeBoxDue } from '@/lib/logic/due.ts';
 import { reportsQuerySchema, firstZodMessage } from '@/lib/validation';
 import { ensureExpiredItemActions } from '@/lib/server/expired-actions';
+import { resolveAllOpenActions } from '@/lib/server/resolve-actions.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -239,6 +240,8 @@ export async function GET(req: Request): Promise<Response> {
 
     const admin = createAdminClient();
     await ensureExpiredItemActions(admin);
+    // ...and close the ones already fixed, so the dashboard counts are current.
+    await resolveAllOpenActions(admin);
     const toExclusive = f.to ? new Date(new Date(f.to).getTime() + 86_400_000).toISOString() : null;
 
     let areaBoxIds: string[] | null = null;

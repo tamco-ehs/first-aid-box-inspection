@@ -9,6 +9,7 @@ import { badRequest, jsonOk, safe } from '@/lib/http';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { actionsQuerySchema, firstZodMessage } from '@/lib/validation';
 import { ensureExpiredItemActions } from '@/lib/server/expired-actions';
+import { resolveAllOpenActions } from '@/lib/server/resolve-actions.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +37,8 @@ export async function GET(req: Request): Promise<Response> {
 
     const admin = createAdminClient();
     await ensureExpiredItemActions(admin);
+    // ...and close the ones already fixed (restocked / expiry revised).
+    await resolveAllOpenActions(admin);
     let q = admin.from('actions').select(SELECT).order('created_at', { ascending: false }).limit(500);
 
     if (f.status && f.status !== 'all') q = q.eq('status', f.status);

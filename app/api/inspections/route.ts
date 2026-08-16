@@ -14,6 +14,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { PUBLIC_ENV } from '@/lib/env';
 import { INSPECTION_PHOTO_FOLDER, isAllowedCloudinaryUrl } from '@/lib/logic/cloudinary-url.ts';
 import { itemActionType, quickCheckActions, type ActionType } from '@/lib/logic/actions.ts';
+import { resolveBoxActions } from '@/lib/server/resolve-actions.ts';
 import { quickInspectionSchema, firstZodMessage } from '@/lib/validation';
 
 export const runtime = 'nodejs';
@@ -262,12 +263,18 @@ export async function POST(req: Request): Promise<Response> {
         await admin.from('box_items').update(u.patch).eq('id', u.id);
       }
 
+      // Clear older actions this inspection has just resolved (item restocked,
+      // expiry revised, or a quick-check question now answered "Yes"), so the
+      // box does not stay flagged after the problem is fixed.
+      const autoClosed = await resolveBoxActions(admin, [body.box_id]);
+
       const summary = {
         ok: itemLines.filter((l) => l.item_status === 'OK').length,
         low_qty: itemLines.filter((l) => l.item_status === 'Low Qty').length,
         missing: itemLines.filter((l) => l.item_status === 'Missing').length,
         expired: itemLines.filter((l) => l.item_status === 'Expired').length,
         actions_created: createdActions.length,
+        actions_auto_closed: autoClosed,
       };
 
       return jsonOk(
