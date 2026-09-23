@@ -4,23 +4,8 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { TamcoBrandLockup } from '@/components/BrandLogo';
 import { Spinner } from '@/components/Spinner';
-import { isPasswordResetRateLimit } from '@/lib/logic/password-reset';
-import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 
 const RESET_COOLDOWN_SECONDS = 60;
-
-function appBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '');
-  if (configured) return configured;
-  if (typeof window !== 'undefined') return window.location.origin;
-  return 'http://localhost:3000';
-}
-
-function friendlyResetError(message: string): string {
-  if (isPasswordResetRateLimit(message)) return 'Too many reset requests. Please wait 60 seconds, then request a new link.';
-  if (/redirect|not allowed|uri/i.test(message)) return 'Password reset is not fully configured. Please contact EHS/Admin.';
-  return 'Could not send the reset email. Please try again.';
-}
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -47,21 +32,25 @@ export default function ForgotPasswordPage() {
     if (submitting || cooldown > 0) return;
     setSubmitting(true);
     setError(null);
-
-    const { error: resetError } = await getSupabaseBrowserClient().auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${appBaseUrl()}/reset-password`,
-    });
-
-    if (resetError) {
-      setError(friendlyResetError(resetError.message));
-      if (isPasswordResetRateLimit(resetError.message)) setCooldown(RESET_COOLDOWN_SECONDS);
+    setSent(false);
+    try {
+      const response = await fetch('/api/auth/forgot-password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const result = await response.json() as { error?: string; retryAfter?: number };
+      if (!response.ok) {
+        setError(result.error ?? 'Could not send the reset email. Please try again.');
+        if (response.status === 429) setCooldown(result.retryAfter ?? RESET_COOLDOWN_SECONDS);
+        return;
+      }
+      setSent(true);
+      setCooldown(result.retryAfter ?? RESET_COOLDOWN_SECONDS);
+    } catch {
+      setError('Could not connect. Check your internet connection and try again.');
+    } finally {
       setSubmitting(false);
-      return;
     }
-
-    setSent(true);
-    setCooldown(RESET_COOLDOWN_SECONDS);
-    setSubmitting(false);
   }
 
   return (
@@ -84,14 +73,14 @@ export default function ForgotPasswordPage() {
 
         {sent && (
           <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-            <p>If this email belongs to an active account, a reset link has been sent.</p>
+            <p>If this email belongs to an active account, you will receive a reset link shortly. Check your spam or junk folder too.</p>
             <p className="mt-1 text-xs">
               Use the newest email only. Older reset links stop working after a new request.
             </p>
           </div>
         )}
 
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>}
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>}
 
         <button type="submit" disabled={submitting || cooldown > 0 || !email.trim()} className="btn btn-lg btn-primary w-full">
           {submitting ? (

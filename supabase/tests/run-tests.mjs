@@ -34,6 +34,9 @@ const steps = [
   ['supabase/sync_template_item_metadata.sql', 'items: sync checklist metadata to boxes'],
   ['supabase/superadmin_roles.sql',  'roles: superadmin/admin/user migration'],
   ['supabase/email_reminder_cycles.sql', 'reminders: cycle dedup migration'],
+  ['supabase/password_reset_rate_limits.sql', 'auth: durable password reset rate limits'],
+  ['supabase/password_reset_rate_limits.sql', 'auth: reset migration rerun is safe'],
+  ['supabase/tests/password_reset_test.sql', 'auth: reset limits, rollover, and access restrictions'],
   ['supabase/tests/smoke_test.sql', 'RLS smoke tests (all roles, all tables)'],
   ['supabase/tests/actions_test.sql', 'revamp smoke tests (actions RLS + code trigger)'],
 ];
