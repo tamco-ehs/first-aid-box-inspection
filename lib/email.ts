@@ -1,11 +1,12 @@
 // =============================================================================
-// Email helper (fetch-based - no SDK dependency). Supports Brevo and Resend,
-// with server-only API keys. Used by the reminder cron. All dynamic values are
+// Shared email helper. Supports authenticated SMTP, Brevo, and Resend with
+// server-only credentials. Used by reminders and password resets. Dynamic values are
 // HTML-escaped before interpolation as defense-in-depth against injection in the
 // email body.
 // =============================================================================
 
 import { PUBLIC_ENV, SERVER_ENV } from '@/lib/env';
+import nodemailer from 'nodemailer';
 
 export interface EmailResult {
   ok: boolean;
@@ -42,7 +43,65 @@ export async function sendEmail(opts: {
   }
 
   const provider = SERVER_ENV.emailProvider();
+  if (provider === 'smtp') return sendSmtpEmail(opts);
   return provider === 'brevo' ? sendBrevoEmail(opts) : sendResendEmail(opts);
+}
+
+export function validateEmailConfiguration(): void {
+  const provider = SERVER_ENV.emailProvider();
+  if (provider === 'smtp') {
+    SERVER_ENV.smtpHost();
+    SERVER_ENV.smtpPort();
+    SERVER_ENV.smtpSecure();
+    SERVER_ENV.smtpRequireTls();
+    SERVER_ENV.smtpUser();
+    SERVER_ENV.smtpPassword();
+    SERVER_ENV.smtpFromEmail();
+    return;
+  }
+  if (provider === 'brevo') SERVER_ENV.brevoApiKey();
+  else SERVER_ENV.resendApiKey();
+}
+
+async function sendSmtpEmail(opts: {
+  to: string[];
+  subject: string;
+  html: string;
+  text: string;
+}): Promise<EmailResult> {
+  try {
+    validateEmailConfiguration();
+    const host = SERVER_ENV.smtpHost();
+    const transporter = nodemailer.createTransport({
+      host,
+      port: SERVER_ENV.smtpPort(),
+      secure: SERVER_ENV.smtpSecure(),
+      requireTLS: SERVER_ENV.smtpRequireTls(),
+      auth: {
+        user: SERVER_ENV.smtpUser(),
+        pass: SERVER_ENV.smtpPassword(),
+      },
+      tls: {
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: true,
+        servername: host,
+      },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
+    });
+    const info = await transporter.sendMail({
+      from: SERVER_ENV.smtpFromEmail(),
+      to: opts.to,
+      ...(SERVER_ENV.smtpReplyTo() ? { replyTo: SERVER_ENV.smtpReplyTo()! } : {}),
+      subject: opts.subject,
+      html: opts.html,
+      text: opts.text,
+    });
+    return { ok: true, id: info.messageId || null };
+  } catch (err) {
+    return { ok: false, id: null, error: err instanceof Error ? err.message : 'SMTP send failed' };
+  }
 }
 
 async function sendResendEmail(opts: {

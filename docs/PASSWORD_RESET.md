@@ -1,7 +1,7 @@
 # Password reset deployment and verification
 
 The application requests a recovery token from Supabase Auth on the server and
-sends it through the existing Brevo/Resend email helper. Supabase still verifies
+sends it through the shared SMTP email helper. Supabase still verifies
 the one-time token and updates the password. No password is sent by email.
 
 ## Before deployment
@@ -9,12 +9,13 @@ the one-time token and updates the password. No password is sent by email.
 1. Run `supabase/password_reset_rate_limits.sql` in the **First Aid** Supabase
    project's SQL editor. It is additive and safe to rerun; do not rerun schema.sql.
 2. Confirm the Vercel production environment contains the existing Supabase URL,
-   anon key, service-role key, `EMAIL_PROVIDER=brevo`, `BREVO_API_KEY`, approved
-   `REMINDER_FROM_EMAIL`, and
+   anon key, service-role key, `EMAIL_PROVIDER=smtp`, `SMTP_HOST`, `SMTP_PORT`,
+   `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD`, approved
+   `EMAIL_FROM`, and
    `NEXT_PUBLIC_APP_URL=https://first-aid-box-inspection.vercel.app`.
-3. Deploy the app. This flow does not use Supabase's built-in email sender or
-   require a new SMTP credential. Keep the reset redirect allowlist for old emails.
-4. Request one reset for a designated test account. Check Brevo Transactional
+3. Deploy the app. This flow does not use Supabase's built-in email sender.
+   Keep the reset redirect allowlist for old emails.
+4. Request one reset for a designated test account. Check the TAMCO mail-server
    logs for delivery, rejection, bounce, or suppression. API acceptance alone
    does not prove inbox delivery.
 5. Open the newest email in another browser. Submit a new password, then sign in
@@ -39,8 +40,19 @@ the one-time token and updates the password. No password is sent by email.
   only a diagnostic code. Missing migration: `reset_rate_limit_unavailable`.
 - Counters contain HMAC hashes, are accessible only to the service role, and
   entries older than a day are cleaned during subsequent requests.
-- Brevo link tracking should be disabled for authentication emails when possible.
-  Confirm the delivered link preserves the fragment during the inbox test.
+- Confirm that any corporate email security/link rewriting preserves the URL
+  fragment during the inbox test. The fragment carries the one-time token.
+
+## TAMCO SMTP notes
+
+- Port 587: `SMTP_SECURE=false`, `SMTP_REQUIRE_TLS=true` (STARTTLS).
+- Port 465: `SMTP_SECURE=true`, `SMTP_REQUIRE_TLS=true` (direct TLS).
+- The SMTP account must be allowed to send as the address in `EMAIL_FROM`.
+- Vercel connects from public cloud IP addresses. TAMCO's mail administrator may
+  need to allow authenticated external SMTP or provide an approved relay. An
+  internal-only SMTP hostname will not be reachable from Vercel.
+- TLS certificates must be valid and trusted; certificate verification is not
+  disabled by the application.
 
 ## Local checks
 

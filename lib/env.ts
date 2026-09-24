@@ -18,6 +18,30 @@ function optional(name: string, fallback: string): string {
   return v && v.trim() !== '' ? v : fallback;
 }
 
+function optionalNumber(name: string, fallback: number): number {
+  const value = optional(name, String(fallback));
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    throw new Error(`Invalid ${name}: expected a TCP port between 1 and 65535`);
+  }
+  return parsed;
+}
+
+function optionalBoolean(name: string, fallback: boolean): boolean {
+  const value = optional(name, String(fallback)).trim().toLowerCase();
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`Invalid ${name}: expected true or false`);
+}
+
+function firstConfigured(...names: string[]): string | null {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
 // --- Public (safe to expose to the browser) ----------------------------------
 export const PUBLIC_ENV = {
   supabaseUrl: () => required('NEXT_PUBLIC_SUPABASE_URL'),
@@ -33,12 +57,25 @@ export const SERVER_ENV = {
   cloudinaryApiSecret: () => required('CLOUDINARY_API_SECRET'),
   emailProvider: () => {
     const explicit = process.env.EMAIL_PROVIDER?.trim().toLowerCase();
-    if (explicit === 'brevo' || explicit === 'resend') return explicit;
+    if (explicit === 'smtp' || explicit === 'brevo' || explicit === 'resend') return explicit;
+    if (process.env.SMTP_HOST?.trim()) return 'smtp';
     return process.env.BREVO_API_KEY?.trim() ? 'brevo' : 'resend';
   },
+  smtpHost: () => required('SMTP_HOST'),
+  smtpPort: () => optionalNumber('SMTP_PORT', 587),
+  smtpSecure: () => optionalBoolean('SMTP_SECURE', optionalNumber('SMTP_PORT', 587) === 465),
+  smtpRequireTls: () => optionalBoolean('SMTP_REQUIRE_TLS', true),
+  smtpUser: () => required('SMTP_USER'),
+  smtpPassword: () => required('SMTP_PASSWORD'),
+  smtpFromEmail: () => {
+    const value = firstConfigured('EMAIL_FROM', 'REMINDER_FROM_EMAIL');
+    if (!value) throw new Error('Missing required environment variable: EMAIL_FROM');
+    return value;
+  },
+  smtpReplyTo: () => firstConfigured('EMAIL_REPLY_TO'),
   brevoApiKey: () => required('BREVO_API_KEY'),
   resendApiKey: () => required('RESEND_API_KEY'),
-  reminderFromEmail: () => optional('REMINDER_FROM_EMAIL', 'First Aid Reminders <onboarding@resend.dev>'),
+  reminderFromEmail: () => optional('EMAIL_FROM', optional('REMINDER_FROM_EMAIL', 'First Aid Reminders <onboarding@resend.dev>')),
   adminNotificationEmail: () => process.env.ADMIN_NOTIFICATION_EMAIL?.trim() || null,
   cronSecret: () => required('CRON_SECRET'),
   ipHashSalt: () => required('IP_HASH_SALT'),

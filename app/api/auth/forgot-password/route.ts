@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { PUBLIC_ENV, SERVER_ENV } from '@/lib/env';
 import { getClientIp } from '@/lib/http';
-import { sendEmail } from '@/lib/email';
+import { sendEmail, validateEmailConfiguration } from '@/lib/email';
 import { requestPasswordReset } from '@/lib/logic/password-reset-request';
 
 export const runtime = 'nodejs';
@@ -38,8 +38,7 @@ export async function POST(req: Request) {
     if (!parsed.success) return reply({ error: 'Enter a valid email address.' }, 400);
 
     // Check configuration even for unknown addresses, without exposing account existence.
-    if (SERVER_ENV.emailProvider() === 'brevo') SERVER_ENV.brevoApiKey();
-    else SERVER_ENV.resendApiKey();
+    validateEmailConfiguration();
     const admin = createAdminClient();
     const hash = (value: string) => createHmac('sha256', SERVER_ENV.supabaseServiceRoleKey()).update(value).digest('hex');
     const result = await requestPasswordReset(parsed.data.email, appUrl, {
